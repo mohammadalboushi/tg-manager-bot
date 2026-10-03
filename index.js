@@ -28,6 +28,53 @@ const ghHeaders = {
 
 let userState = { repo: null, action: null, time: 0, path: "" };
 
+// نظام طابور لرفع الملفات المتعددة بدون زحمة أو أخطاء
+const uploadQueues = new Map();
+
+async function processQueue(chatId, repo) {
+  const queueData = uploadQueues.get(chatId);
+  if (!queueData || queueData.items.length === 0) {
+    if (queueData && queueData.statusMsgId) {
+      bot.editMessageText(`✅ **تم رفع جميع الملفات بنجاح تام!** 🚀\nالمستودع: \`${repo}\``, {
+        chat_id: chatId, message_id: queueData.statusMsgId, parse_mode: "Markdown",
+        reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع للمستودع", callback_data: `repo:${repo}` }]] }
+      }).catch(()=>{});
+    }
+    uploadQueues.delete(chatId);
+    return;
+  }
+
+  queueData.isProcessing = true;
+  const current = queueData.items.shift();
+  
+  try {
+    let sha = null;
+    try {
+      const checkRes = await axios.get(`https://api.github.com/repos/${ghUser}/${repo}/contents/${current.finalPath}`, { headers: ghHeaders });
+      sha = checkRes.data.sha;
+    } catch (e) {}
+
+    const payload = { message: "رفع ملف متعدد", content: current.base64Content };
+    if (sha) payload.sha = sha;
+
+    await axios.put(`https://api.github.com/repos/${ghUser}/${repo}/contents/${current.finalPath}`, payload, { headers: ghHeaders });
+    
+    // تحديث رسالة التقدم
+    const remaining = queueData.items.length;
+    bot.editMessageText(`⏳ جاري الرفع... الباقي في الطابور: \`${remaining + 1}\` ملفات`, {
+      chat_id: chatId, message_id: queueData.statusMsgId, parse_mode: "Markdown"
+    }).catch(()=>{});
+
+  } catch (err) {
+    console.log(`فشل رفع ${current.rawFileName}:`, err.message);
+  }
+
+  // فاصل زمني ثانية ونص بين كل ملف والتاني لضمان عدم حدوث تصادم مع غيتهوب
+  setTimeout(() => {
+    processQueue(chatId, repo);
+  }, 1500);
+}
+
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   if (chatId.toString() !== adminId) return bot.sendMessage(chatId, "🔒 مقفل.");
@@ -42,7 +89,11 @@ bot.on('callback_query', async (query) => {
 
   bot.answerCallbackQuery(query.id).catch(() => {});
 
-  if (data.startsWith("page:")) {
+  if (data === "new_repo") {
+    userState.action = "new_repo";
+    bot.sendMessage(chatId, "📌 **إنشاء مستودع جديد**\n\n👇 اعمل رد (Reply) واكتب اسم المستودع (بالانجليزي بدون مسافات):", { reply_markup: { force_reply: true } });
+  }
+  else if (data.startsWith("page:")) {
     await sendReposMenu(chatId, parseInt(data.split(":")[1]), msgId);
   } 
   else if (data.startsWith("repo:")) {
@@ -52,94 +103,104 @@ bot.on('callback_query', async (query) => {
   } 
   else if (data.startsWith("confirm_empty:")) {
     const targetRepo = data.split(":")[1];
-    const confirmMenu = {
-      inline_keyboard: [
-        [{ text: "⚠️ نعم، احذف كل شيء نهائياً!", callback_data: `empty_repo:${targetRepo}` }],
-        [{ text: "❌ تراجع وإلغاء", callback_data: `repo:${targetRepo}` }]
-      ]
-    };
-    bot.editMessageText(`⚠️ **تأكيد فرمتة المستودع:** \`${targetRepo}\`\n\nهل أنت متأكد تماماً؟ سيتم مسح **جميع** الملفات والمجلدات ولا يمكن التراجع!`, {
-      chat_id: chatId,
-      message_id: msgId,
-      parse_mode: "Markdown",
-      reply_markup: confirmMenu
+    bot.editMessageText(`⚠️ **تأكيد فرمتة المستودع:** \`${targetRepo}\`\n\nهل أنت متأكد؟ سيتم مسح جميع الملفات!`, {
+      chat_id: chatId, message_id: msgId, parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: [
+        [{ text: "⚠️ نعم، احذف كل الملفات!", callback_data: `empty_repo:${targetRepo}` }],
+        [{ text: "❌ تراجع", callback_data: `repo:${targetRepo}` }]
+      ]}
+    });
+  }
+  else if (data.startsWith("confirm_delete_repo:")) {
+    const targetRepo = data.split(":")[1];
+    bot.editMessageText(`🚨 **تدمير المستودع بالكامل:** \`${targetRepo}\``, {
+      chat_id: chatId, message_id: msgId, parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: [
+        [{ text: "☠️ نعم، دمر المستودع نهائياً!", callback_data: `delete_repo:${targetRepo}` }],
+        [{ text: "❌ تراجع", callback_data: `repo:${targetRepo}` }]
+      ]}
     });
   }
   else if (data.startsWith("empty_repo:")) {
     const targetRepo = data.split(":")[1];
-    bot.editMessageText(`⏳ جاري مسح كافة المحتويات في \`${targetRepo}\`...`, { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" });
+    bot.editMessageText(`⏳ جاري فرمتة المستودع...`, { chat_id: chatId, message_id: msgId });
     await emptyRepository(chatId, targetRepo, msgId);
+  }
+  else if (data.startsWith("delete_repo:")) {
+    const targetRepo = data.split(":")[1];
+    bot.editMessageText(`⏳ جاري حذف المستودع...`, { chat_id: chatId, message_id: msgId });
+    await deleteFullRepository(chatId, targetRepo, msgId);
   }
   else if (data.startsWith("act:")) {
     const parts = data.split(":");
     const action = parts[1];
     const repo = parts[2];
-
     userState.repo = repo;
     userState.action = action;
     userState.time = Date.now();
 
-    if (action === "upload") {
-      bot.sendMessage(chatId, `📌 **وضع الرفع المتعدد مفتوح الآن لمستودع:** \`${repo}\`\n\n👇 ابعت الملفات أو الصور مباشرة (دفعة وحدة أو ورا بعض). إذا بدك مجلد مخصص اكتب اسمه بالـ Caption.`, { parse_mode: "Markdown" });
-    }
-    else if (action === "zip") {
-      bot.sendMessage(chatId, `📌 **رفع وفك ZIP** 📦 لمستودع: \`${repo}\`\n\n👇 ابعت ملف الـ ZIP مباشرة.`, { parse_mode: "Markdown" });
-    }
-    else if (action === "newfile") {
-      bot.sendMessage(chatId, `📌 **إنشاء ملف كود** في: \`${repo}\`\n\n👇 اعمل رد (Reply) على هذه الرسالة واكتب:\nاسم_الملف.html\nالكود يبدأ من السطر الثاني`, { reply_markup: { force_reply: true } });
-    }
-    else if (action === "newdir") {
-      bot.sendMessage(chatId, `📌 **إنشاء مجلد** في: \`${repo}\`\n\n👇 اعمل رد (Reply) على هذه الرسالة واكتب اسم المجلد.`, { reply_markup: { force_reply: true } });
-    }
-    else if (action === "delete") {
-      bot.sendMessage(chatId, `📌 **حذف ملف أو مجلد** من: \`${repo}\`\n\n👇 اعمل رد (Reply) على هذه الرسالة واكتب مسار الملف أو المجلد لحذفه.`, { reply_markup: { force_reply: true } });
-    }
+    if (action === "upload") bot.sendMessage(chatId, `📌 **وضع الرفع الجماعي مفعل لـ:** \`${repo}\`\n\n👇 حدد أي عدد بدك ياه من الملفات (8 أو 100) وبعتهن دفعة وحدة. البوت رح يرتبهم ويرفعهم لحاله!`, { parse_mode: "Markdown" });
+    else if (action === "zip") bot.sendMessage(chatId, `📌 **رفع وفك ZIP** 📦 لـ: \`${repo}\`\n\n👇 ابعت ملف الـ ZIP مباشرة.`, { parse_mode: "Markdown" });
+    else if (action === "newfile") bot.sendMessage(chatId, `📌 **إنشاء ملف كود** في: \`${repo}\`\n\n👇 اعمل رد (Reply) واكتب:\nاسم_الملف.html\nالكود بالسطر الثاني`, { reply_markup: { force_reply: true } });
+    else if (action === "newdir") bot.sendMessage(chatId, `📌 **إنشاء مجلد** في: \`${repo}\`\n\n👇 اعمل رد واكتب اسم المجلد.`, { reply_markup: { force_reply: true } });
+    else if (action === "delete") bot.sendMessage(chatId, `📌 **حذف ملف/مجلد** من: \`${repo}\`\n\n👇 اعمل رد واكتب مسار الملف أو المجلد.`, { reply_markup: { force_reply: true } });
   }
 });
 
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   if (chatId.toString() !== adminId || msg.text === "/start") return;
-  if (!userState.repo) return bot.sendMessage(chatId, "⚠️ اختار مستودع أولاً من /start");
 
-  const repo = userState.repo;
   const isReply = msg.reply_to_message;
   let fileObj = msg.document || msg.video || msg.audio;
   if (msg.photo) fileObj = msg.photo[msg.photo.length - 1];
 
   try {
-    // 1. معالجة ملفات ZIP
+    if (isReply && isReply.text && isReply.text.includes("إنشاء مستودع جديد") && msg.text) {
+      const repoName = msg.text.trim().replace(/\s+/g, '-');
+      const statusMsg = await bot.sendMessage(chatId, `⏳ جاري إنشاء المستودع \`${repoName}\` وتفعيل الموقع...`, { parse_mode: "Markdown" });
+      await createNewRepository(chatId, repoName, statusMsg.message_id);
+      return;
+    }
+
+    if (!userState.repo && !fileObj) return bot.sendMessage(chatId, "⚠️ اختار مستودع أولاً من القائمة.");
+    const repo = userState.repo;
+
     if (fileObj && (userState.action === "zip" || (fileObj.file_name && fileObj.file_name.endsWith(".zip")))) {
-      if (fileObj.file_size > 20971520) {
-        return bot.sendMessage(chatId, `❌ حجم الملف تجاوز 20 ميغا (حد تيليغرام للبوتات).`);
-      }
+      if (fileObj.file_size > 20971520) return bot.sendMessage(chatId, `❌ حجم الملف تجاوز 20 ميغا.`);
       const statusMsg = await bot.sendMessage(chatId, `⏳ جاري تحميل وفك الضغط...`);
       const fileUrl = await bot.getFileLink(fileObj.file_id);
       const response = await axios.get(fileUrl, { responseType: 'arraybuffer' });
-      await bot.editMessageText(`⏳ جاري رفع الشجرة الكاملة إلى \`${repo}\`...`, { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: "Markdown" });
       await extractAndUploadZip(chatId, repo, response.data, statusMsg.message_id);
       return;
     }
 
-    // 2. معالجة أي ملف عادي (دعم الرفع المباشر والمتعدد)
     if (fileObj) {
-      if (fileObj.file_size > 20971520) {
-        return bot.sendMessage(chatId, `❌ ملف \`${fileObj.file_name || 'الملف'}\` أكبر من 20 ميغا.`);
-      }
+      if (fileObj.file_size > 20971520) return bot.sendMessage(chatId, `❌ الملف أكبر من 20 ميغا.`);
+      
       const customPath = (msg.caption || userState.path || "").trim();
       const rawFileName = fileObj.file_name || `file_${Date.now()}`;
       const finalPath = customPath ? `${customPath}/${rawFileName}` : rawFileName;
 
-      const statusMsg = await bot.sendMessage(chatId, `⏳ جاري رفع \`${rawFileName}\`...`);
       const fileUrl = await bot.getFileLink(fileObj.file_id);
       const response = await axios.get(fileUrl, { responseType: 'arraybuffer' });
       const base64Content = Buffer.from(response.data).toString('base64');
 
-      await executeGitHubAction(chatId, repo, finalPath, base64Content, "رفع ملف", statusMsg.message_id);
+      // إضافة الملف إلى طابور المعالجة الجماعية
+      if (!uploadQueues.has(chatId)) {
+        const statusMsg = await bot.sendMessage(chatId, `⏳ جاري تجهيز طابور الرفع...`);
+        uploadQueues.set(chatId, { items: [], statusMsgId: statusMsg.message_id, isProcessing: false });
+      }
+
+      const queueData = uploadQueues.get(chatId);
+      queueData.items.push({ rawFileName, finalPath, base64Content });
+
+      if (!queueData.isProcessing) {
+        processQueue(chatId, repo);
+      }
       return;
     }
 
-    // 3. معالجة النصوص والردود
     if (isReply && msg.text) {
       const parent = isReply.text || "";
       if (parent.includes("إنشاء ملف كود")) {
@@ -147,16 +208,16 @@ bot.on('message', async (msg) => {
         const path = lines[0].trim();
         const content = lines.slice(1).join("\n");
         const statusMsg = await bot.sendMessage(chatId, `⏳ جاري إنشاء \`${path}\`...`);
-        await executeGitHubAction(chatId, repo, path, Buffer.from(content).toString('base64'), "إنشاء ملف جديد", statusMsg.message_id);
+        await executeGitHubAction(chatId, repo, path, Buffer.from(content).toString('base64'), statusMsg.message_id);
       }
       else if (parent.includes("إنشاء مجلد")) {
         const path = `${msg.text.trim()}/.gitkeep`;
         const statusMsg = await bot.sendMessage(chatId, `⏳ جاري إنشاء المجلد...`);
-        await executeGitHubAction(chatId, repo, path, Buffer.from("").toString('base64'), "إنشاء مجلد", statusMsg.message_id);
+        await executeGitHubAction(chatId, repo, path, Buffer.from("").toString('base64'), statusMsg.message_id);
       }
       else if (parent.includes("حذف ملف أو مجلد")) {
         const path = msg.text.trim();
-        const statusMsg = await bot.sendMessage(chatId, `⏳ جاري فحص ومسح \`${path}\`...`);
+        const statusMsg = await bot.sendMessage(chatId, `⏳ جاري الحذف...`);
         await processDelete(chatId, repo, path, statusMsg.message_id);
       }
     }
@@ -164,6 +225,39 @@ bot.on('message', async (msg) => {
     bot.sendMessage(chatId, `❌ خطأ: ${err.message}`);
   }
 });
+
+async function createNewRepository(chatId, repoName, msgId) {
+  try {
+    await axios.post(`https://api.github.com/user/repos`, { name: repoName, private: false, auto_init: false }, { headers: ghHeaders });
+    const content = Buffer.from("This is a temporary file.").toString('base64');
+    await axios.put(`https://api.github.com/repos/${ghUser}/${repoName}/contents/temp`, {
+      message: "Initial commit", content, branch: "main"
+    }, { headers: ghHeaders });
+
+    await axios.post(`https://api.github.com/repos/${ghUser}/${repoName}/pages`, {
+      source: { branch: "main", path: "/" }
+    }, { headers: ghHeaders });
+
+    bot.editMessageText(`✅ **تم إنشاء المستودع \`${repoName}\` وتفعيل Pages بنجاح!**\nرابط موقعك: https://${ghUser}.github.io/${repoName}/`, {
+      chat_id: chatId, message_id: msgId, parse_mode: "Markdown", disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع للقائمة", callback_data: `page:1` }]] }
+    });
+  } catch (e) {
+    bot.editMessageText(`❌ فشل إنشاء المستودع: ${e.message}`, { chat_id: chatId, message_id: msgId });
+  }
+}
+
+async function deleteFullRepository(chatId, repoName, msgId) {
+  try {
+    await axios.delete(`https://api.github.com/repos/${ghUser}/${repoName}`, { headers: ghHeaders });
+    bot.editMessageText(`☠️ **تم تدمير المستودع \`${repoName}\` نهائياً!**`, {
+      chat_id: chatId, message_id: msgId, parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع للقائمة", callback_data: `page:1` }]] }
+    });
+  } catch (e) {
+    bot.editMessageText(`❌ فشل الحذف: ${e.message}`, { chat_id: chatId, message_id: msgId });
+  }
+}
 
 async function sendReposMenu(chatId, page, messageId = null) {
   try {
@@ -174,11 +268,12 @@ async function sendReposMenu(chatId, page, messageId = null) {
     const start = (page - 1) * itemsPerPage;
     const currentRepos = repos.slice(start, start + itemsPerPage);
 
-    const keyboard = currentRepos.map(r => [{ text: `📁 ${r.name}`, callback_data: `repo:${r.name}` }]);
+    const keyboard = [[{ text: "➕ إنشاء مستودع جديد", callback_data: `new_repo` }]];
+    currentRepos.forEach(r => keyboard.push([{ text: `📁 ${r.name}`, callback_data: `repo:${r.name}` }]));
     
     let navButtons = [];
     if (page > 1) navButtons.push({ text: "◀️ السابق", callback_data: `page:${page - 1}` });
-    navButtons.push({ text: `${page}/${totalPages}`, callback_data: "ignore" });
+    if (totalPages > 0) navButtons.push({ text: `${page}/${totalPages}`, callback_data: "ignore" });
     if (page < totalPages) navButtons.push({ text: "التالي ▶️", callback_data: `page:${page + 1}` });
     if (navButtons.length > 0) keyboard.push(navButtons);
 
@@ -186,7 +281,7 @@ async function sendReposMenu(chatId, page, messageId = null) {
     if (messageId) bot.editMessageText("👇 **اختر المستودع للعمل عليه:**", { chat_id: chatId, message_id: messageId, ...opts });
     else bot.sendMessage(chatId, "👇 **اختر المستودع للعمل عليه:**", opts);
   } catch (e) {
-    bot.sendMessage(chatId, "❌ تعذر جلب قائمة المستودعات.");
+    bot.sendMessage(chatId, "❌ تعذر جلب المستودعات.");
   }
 }
 
@@ -196,13 +291,11 @@ async function sendRepoOptions(chatId, repoName, messageId) {
     [{ text: "📄 إنشاء ملف", callback_data: `act:newfile:${repoName}` }, { text: "📁 إنشاء مجلد", callback_data: `act:newdir:${repoName}` }],
     [{ text: "🗑️ حذف ملف/مجلد", callback_data: `act:delete:${repoName}` }],
     [{ text: "💣 فرمتة المستودع", callback_data: `confirm_empty:${repoName}` }],
+    [{ text: "🧨 حذف المستودع نهائياً", callback_data: `confirm_delete_repo:${repoName}` }],
     [{ text: "🔙 رجوع للقائمة", callback_data: `page:1` }]
   ];
-  bot.editMessageText(`🛠️ **المستودع النشط:** \`${repoName}\`\nاختر العملية المطلوبة:`, {
-    chat_id: chatId,
-    message_id: messageId,
-    parse_mode: "Markdown",
-    reply_markup: { inline_keyboard: keyboard }
+  bot.editMessageText(`🛠️ **المستودع النشط:** \`${repoName}\``, {
+    chat_id: chatId, message_id: messageId, parse_mode: "Markdown", reply_markup: { inline_keyboard: keyboard }
   });
 }
 
@@ -211,7 +304,6 @@ async function extractAndUploadZip(chatId, repo, zipBuffer, msgId) {
     const zip = new AdmZip(zipBuffer);
     const zipEntries = zip.getEntries();
     let tree = [];
-
     const repoInfo = await axios.get(`https://api.github.com/repos/${ghUser}/${repo}`, { headers: ghHeaders });
     const branch = repoInfo.data.default_branch || "main";
     const refInfo = await axios.get(`https://api.github.com/repos/${ghUser}/${repo}/git/refs/heads/${branch}`, { headers: ghHeaders });
@@ -224,25 +316,20 @@ async function extractAndUploadZip(chatId, repo, zipBuffer, msgId) {
         tree.push({ path: entry.entryName, mode: '100644', type: 'blob', sha: blobRes.data.sha });
       }
     }
-
-    if (tree.length === 0) return bot.editMessageText(`❌ ملف ZIP لا يحتوي على ملفات صالحة.`, { chat_id: chatId, message_id: msgId });
-
     const treeRes = await axios.post(`https://api.github.com/repos/${ghUser}/${repo}/git/trees`, { base_tree: baseCommitSha, tree }, { headers: ghHeaders });
-    const commitRes = await axios.post(`https://api.github.com/repos/${ghUser}/${repo}/git/commits`, { message: "📦 رفع مجلد عبر ملف ZIP", tree: treeRes.data.sha, parents: [baseCommitSha] }, { headers: ghHeaders });
+    const commitRes = await axios.post(`https://api.github.com/repos/${ghUser}/${repo}/git/commits`, { message: "📦 رفع ZIP", tree: treeRes.data.sha, parents: [baseCommitSha] }, { headers: ghHeaders });
     await axios.patch(`https://api.github.com/repos/${ghUser}/${repo}/git/refs/heads/${branch}`, { sha: commitRes.data.sha }, { headers: ghHeaders });
 
-    bot.editMessageText(`✅ **تم فك الضغط ورفع (${tree.length}) ملف بنجاح!** 🚀`, {
-      chat_id: chatId,
-      message_id: msgId,
-      parse_mode: "Markdown",
-      reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع", callback_data: `repo:${repo}` }]] }
+    bot.editMessageText(`✅ **تم رفع وفك ${tree.length} ملف بنجاح!** 🚀`, {
+      chat_id: chatId, message_id: msgId, parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع للمستودع", callback_data: `repo:${repo}` }]] }
     });
   } catch (e) {
-    bot.editMessageText(`❌ فشلت معالجة ملف الـ ZIP: ${e.message}`, { chat_id: chatId, message_id: msgId });
+    bot.editMessageText(`❌ خطأ بملف الـ ZIP: ${e.message}`, { chat_id: chatId, message_id: msgId });
   }
 }
 
-async function executeGitHubAction(chatId, repo, path, base64Content, commitMsg, msgId) {
+async function executeGitHubAction(chatId, repo, path, base64Content, msgId) {
   try {
     let sha = null;
     try {
@@ -250,21 +337,16 @@ async function executeGitHubAction(chatId, repo, path, base64Content, commitMsg,
       sha = checkRes.data.sha;
     } catch (e) {}
 
-    const payload = { message: commitMsg, content: base64Content };
+    const payload = { message: "تحديث ملف", content: base64Content };
     if (sha) payload.sha = sha;
 
     await axios.put(`https://api.github.com/repos/${ghUser}/${repo}/contents/${path}`, payload, { headers: ghHeaders });
-    const liveUrl = `https://${ghUser}.github.io/${repo}/`;
-    
-    bot.editMessageText(`✅ **تم حفظ الملف بنجاح!**\n📄 \`${path}\`\n🌐 [معاينة في Pages](${liveUrl})`, {
-      chat_id: chatId,
-      message_id: msgId,
-      parse_mode: "Markdown",
-      disable_web_page_preview: true,
+    bot.editMessageText(`✅ **تم حفظ \`${path}\` بنجاح!**`, {
+      chat_id: chatId, message_id: msgId, parse_mode: "Markdown",
       reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع للمستودع", callback_data: `repo:${repo}` }]] }
     });
   } catch (e) {
-    bot.editMessageText(`❌ فشل رفع الملف: ${e.message}`, { chat_id: chatId, message_id: msgId });
+    bot.editMessageText(`❌ خطأ: ${e.message}`, { chat_id: chatId, message_id: msgId });
   }
 }
 
@@ -272,24 +354,19 @@ async function processDelete(chatId, repo, path, msgId) {
   try {
     const checkRes = await axios.get(`https://api.github.com/repos/${ghUser}/${repo}/contents/${path}`, { headers: ghHeaders });
     const data = checkRes.data;
-
     if (Array.isArray(data)) {
-      bot.editMessageText(`⏳ جاري تنظيف المجلد \`${path}\` وكل ما بداخله...`, { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" });
       for (let item of data) await deleteRecursive(repo, item.path);
     } else {
       await axios.delete(`https://api.github.com/repos/${ghUser}/${repo}/contents/${path}`, {
-        headers: ghHeaders,
-        data: { message: `حذف ${path}`, sha: data.sha }
+        headers: ghHeaders, data: { message: `حذف ${path}`, sha: data.sha }
       });
     }
-    bot.editMessageText(`✅ تم حذف \`${path}\` بنجاح! 🗑️`, {
-      chat_id: chatId,
-      message_id: msgId,
-      parse_mode: "Markdown",
+    bot.editMessageText(`✅ تم الحذف بنجاح! 🗑️`, {
+      chat_id: chatId, message_id: msgId, parse_mode: "Markdown",
       reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع للمستودع", callback_data: `repo:${repo}` }]] }
     });
   } catch (e) {
-    bot.editMessageText(`❌ المسار غير موجود أو تعذر حذفه.`, { chat_id: chatId, message_id: msgId });
+    bot.editMessageText(`❌ تعذر الحذف.`, { chat_id: chatId, message_id: msgId });
   }
 }
 
@@ -301,8 +378,7 @@ async function deleteRecursive(repo, path) {
       for (let item of data) await deleteRecursive(repo, item.path);
     } else {
       await axios.delete(`https://api.github.com/repos/${ghUser}/${repo}/contents/${path}`, {
-        headers: ghHeaders,
-        data: { message: `Delete ${path}`, sha: data.sha }
+        headers: ghHeaders, data: { message: `Delete ${path}`, sha: data.sha }
       });
     }
   } catch (e) {}
@@ -312,33 +388,19 @@ async function emptyRepository(chatId, repo, msgId) {
   try {
     const contentsRes = await axios.get(`https://api.github.com/repos/${ghUser}/${repo}/contents`, { headers: ghHeaders });
     const files = contentsRes.data;
-
-    if (!files || files.length === 0) {
-      return bot.editMessageText(`ℹ️ المستودع فارغ بالفعل.`, {
-        chat_id: chatId,
-        message_id: msgId,
-        reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع", callback_data: `repo:${repo}` }]] }
-      });
-    }
+    if (!files || files.length === 0) return bot.editMessageText(`ℹ️ المستودع فارغ أساساً.`, { chat_id: chatId, message_id: msgId });
 
     for (let item of files) {
-      if (item.type === "dir") {
-        await deleteRecursive(repo, item.path);
-      } else {
-        await axios.delete(`https://api.github.com/repos/${ghUser}/${repo}/contents/${item.path}`, {
-          headers: ghHeaders,
-          data: { message: `حذف نهائي: ${item.path}`, sha: item.sha }
-        });
-      }
+      if (item.type === "dir") await deleteRecursive(repo, item.path);
+      else await axios.delete(`https://api.github.com/repos/${ghUser}/${repo}/contents/${item.path}`, {
+        headers: ghHeaders, data: { message: `حذف`, sha: item.sha }
+      });
     }
-
-    bot.editMessageText(`💣 **تم تفريغ المستودع \`${repo}\` بالكامل بنجاح!**\nأصبح نظيفاً تماماً الآن.`, {
-      chat_id: chatId,
-      message_id: msgId,
-      parse_mode: "Markdown",
+    bot.editMessageText(`💣 **تم فرمتة المستودع بالكامل!**`, {
+      chat_id: chatId, message_id: msgId, parse_mode: "Markdown",
       reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع للمستودع", callback_data: `repo:${repo}` }]] }
     });
   } catch (e) {
-    bot.editMessageText(`❌ فشلت عملية الفرمتة: ${e.message}`, { chat_id: chatId, message_id: msgId });
+    bot.editMessageText(`❌ فشلت الفرمتة.`, { chat_id: chatId, message_id: msgId });
   }
 }

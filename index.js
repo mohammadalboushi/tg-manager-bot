@@ -404,3 +404,11 @@ async function emptyRepository(chatId, repo, msgId) {
     bot.editMessageText(`❌ فشلت الفرمتة.`, { chat_id: chatId, message_id: msgId });
   }
 }
+// ================== درع الحماية من الإغلاق المفاجئ ==================
+process.on('uncaughtException', function (err) {
+  console.log('تم منع جلطة بالسيرفر (Exception): ', err.message);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.log('تم منع جلطة بالسيرفر (Rejection):', reason);
+});
+

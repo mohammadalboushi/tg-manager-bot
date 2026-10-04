@@ -26,7 +26,7 @@ app.use((req, res) => res.send("Bot is Alive 100%"));
 app.listen(port, () => {
   console.log("Server running on port " + port);
   setInterval(() => {
-    axios.get("https://tg-manager-bot-zwuv.onrender.com").catch(() => {});
+    axios.get("https://tg-manager-bot-zwwv.onrender.com").catch(() => {});
   }, 10 * 60 * 1000);
 });
 

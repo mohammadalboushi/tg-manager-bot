@@ -28,14 +28,13 @@ const ghHeaders = {
 
 let userState = { repo: null, action: null, time: 0, path: "" };
 
-// نظام طابور لرفع الملفات المتعددة بدون زحمة أو أخطاء
 const uploadQueues = new Map();
 
 async function processQueue(chatId, repo) {
   const queueData = uploadQueues.get(chatId);
   if (!queueData || queueData.items.length === 0) {
     if (queueData && queueData.statusMsgId) {
-      bot.editMessageText(`✅ **تم رفع جميع الملفات بنجاح تام!** 🚀\nالمستودع: \`${repo}\``, {
+      bot.editMessageText(`✅ **تم رفع جميع الملفات واستبدالها بنجاح تام!** 🚀\nالمستودع: \`${repo}\``, {
         chat_id: chatId, message_id: queueData.statusMsgId, parse_mode: "Markdown",
         reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع للمستودع", callback_data: `repo:${repo}` }]] }
       }).catch(()=>{});
@@ -44,24 +43,27 @@ async function processQueue(chatId, repo) {
     return;
   }
 
-  queueData.isProcessing = true;
   const current = queueData.items.shift();
   
   try {
+    // التنزيل صار جوا الطابور مشان ما يعلق السيرفر بالزحمة
+    const fileUrl = await bot.getFileLink(current.fileId);
+    const response = await axios.get(fileUrl, { responseType: 'arraybuffer' });
+    const base64Content = Buffer.from(response.data).toString('base64');
+
     let sha = null;
     try {
       const checkRes = await axios.get(`https://api.github.com/repos/${ghUser}/${repo}/contents/${current.finalPath}`, { headers: ghHeaders });
       sha = checkRes.data.sha;
     } catch (e) {}
 
-    const payload = { message: "رفع ملف متعدد", content: current.base64Content };
+    const payload = { message: `تحديث ${current.rawFileName}`, content: base64Content };
     if (sha) payload.sha = sha;
 
     await axios.put(`https://api.github.com/repos/${ghUser}/${repo}/contents/${current.finalPath}`, payload, { headers: ghHeaders });
     
-    // تحديث رسالة التقدم
     const remaining = queueData.items.length;
-    bot.editMessageText(`⏳ جاري الرفع... الباقي في الطابور: \`${remaining + 1}\` ملفات`, {
+    bot.editMessageText(`⏳ جاري الرفع...\nالملف الحالي: \`${current.rawFileName}\`\nالباقي في الطابور: \`${remaining}\` ملفات`, {
       chat_id: chatId, message_id: queueData.statusMsgId, parse_mode: "Markdown"
     }).catch(()=>{});
 
@@ -69,7 +71,6 @@ async function processQueue(chatId, repo) {
     console.log(`فشل رفع ${current.rawFileName}:`, err.message);
   }
 
-  // فاصل زمني ثانية ونص بين كل ملف والتاني لضمان عدم حدوث تصادم مع غيتهوب
   setTimeout(() => {
     processQueue(chatId, repo);
   }, 1500);
@@ -139,7 +140,7 @@ bot.on('callback_query', async (query) => {
     userState.action = action;
     userState.time = Date.now();
 
-    if (action === "upload") bot.sendMessage(chatId, `📌 **وضع الرفع الجماعي مفعل لـ:** \`${repo}\`\n\n👇 حدد أي عدد بدك ياه من الملفات (8 أو 100) وبعتهن دفعة وحدة. البوت رح يرتبهم ويرفعهم لحاله!`, { parse_mode: "Markdown" });
+    if (action === "upload") bot.sendMessage(chatId, `📌 **وضع الرفع الجماعي مفعل لـ:** \`${repo}\`\n\n👇 حدد أي عدد بدك ياه من الملفات (حتى لو 100) وبعتهن دفعة وحدة. البوت رح يرتبهم ويرفعهم لحاله!`, { parse_mode: "Markdown" });
     else if (action === "zip") bot.sendMessage(chatId, `📌 **رفع وفك ZIP** 📦 لـ: \`${repo}\`\n\n👇 ابعت ملف الـ ZIP مباشرة.`, { parse_mode: "Markdown" });
     else if (action === "newfile") bot.sendMessage(chatId, `📌 **إنشاء ملف كود** في: \`${repo}\`\n\n👇 اعمل رد (Reply) واكتب:\nاسم_الملف.html\nالكود بالسطر الثاني`, { reply_markup: { force_reply: true } });
     else if (action === "newdir") bot.sendMessage(chatId, `📌 **إنشاء مجلد** في: \`${repo}\`\n\n👇 اعمل رد واكتب اسم المجلد.`, { reply_markup: { force_reply: true } });
@@ -178,25 +179,27 @@ bot.on('message', async (msg) => {
     if (fileObj) {
       if (fileObj.file_size > 20971520) return bot.sendMessage(chatId, `❌ الملف أكبر من 20 ميغا.`);
       
+      let rawFileName = fileObj.file_name || `file_${Date.now()}`;
+      // مسح الأرقام اللي بيضيفها تلغرام متل (1) و (2) لاستبدال الملف الأصلي
+      rawFileName = rawFileName.replace(/\s\(\d+\)/g, '');
+      
       const customPath = (msg.caption || userState.path || "").trim();
-      const rawFileName = fileObj.file_name || `file_${Date.now()}`;
       const finalPath = customPath ? `${customPath}/${rawFileName}` : rawFileName;
 
-      const fileUrl = await bot.getFileLink(fileObj.file_id);
-      const response = await axios.get(fileUrl, { responseType: 'arraybuffer' });
-      const base64Content = Buffer.from(response.data).toString('base64');
-
-      // إضافة الملف إلى طابور المعالجة الجماعية
       if (!uploadQueues.has(chatId)) {
-        const statusMsg = await bot.sendMessage(chatId, `⏳ جاري تجهيز طابور الرفع...`);
-        uploadQueues.set(chatId, { items: [], statusMsgId: statusMsg.message_id, isProcessing: false });
+        uploadQueues.set(chatId, { items: [], statusMsgId: null, isProcessing: false });
       }
 
       const queueData = uploadQueues.get(chatId);
-      queueData.items.push({ rawFileName, finalPath, base64Content });
+      // حجز مكان بالطابور فوراً من دون انتظار التنزيل
+      queueData.items.push({ fileId: fileObj.file_id, rawFileName, finalPath });
 
       if (!queueData.isProcessing) {
-        processQueue(chatId, repo);
+        queueData.isProcessing = true;
+        bot.sendMessage(chatId, `⏳ جاري استلام الملفات وبدء الطابور...`).then(statusMsg => {
+          queueData.statusMsgId = statusMsg.message_id;
+          processQueue(chatId, repo);
+        });
       }
       return;
     }
@@ -404,11 +407,9 @@ async function emptyRepository(chatId, repo, msgId) {
     bot.editMessageText(`❌ فشلت الفرمتة.`, { chat_id: chatId, message_id: msgId });
   }
 }
-// ================== درع الحماية من الإغلاق المفاجئ ==================
 process.on('uncaughtException', function (err) {
   console.log('تم منع جلطة بالسيرفر (Exception): ', err.message);
 });
 process.on('unhandledRejection', (reason, promise) => {
   console.log('تم منع جلطة بالسيرفر (Rejection):', reason);
 });
-

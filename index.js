@@ -28,52 +28,51 @@ const ghHeaders = {
 
 let userState = { repo: null, action: null, time: 0, path: "" };
 
+// نظام التجميع الذكي للدفعة الواحدة
 const uploadQueues = new Map();
 
-async function processQueue(chatId, repo) {
-  const queueData = uploadQueues.get(chatId);
-  if (!queueData || queueData.items.length === 0) {
-    if (queueData && queueData.statusMsgId) {
-      bot.editMessageText(`✅ **تم رفع جميع الملفات واستبدالها بنجاح تام!** 🚀\nالمستودع: \`${repo}\``, {
-        chat_id: chatId, message_id: queueData.statusMsgId, parse_mode: "Markdown",
-        reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع للمستودع", callback_data: `repo:${repo}` }]] }
-      }).catch(()=>{});
-    }
-    uploadQueues.delete(chatId);
-    return;
-  }
+async function processAlbumAsOneCommit(chatId, repo, queueData) {
+  uploadQueues.delete(chatId);
+  const items = queueData.items;
+  if (!items || items.length === 0) return;
 
-  const current = queueData.items.shift();
-  
   try {
-    // التنزيل صار جوا الطابور مشان ما يعلق السيرفر بالزحمة
-    const fileUrl = await bot.getFileLink(current.fileId);
-    const response = await axios.get(fileUrl, { responseType: 'arraybuffer' });
-    const base64Content = Buffer.from(response.data).toString('base64');
+    if (queueData.statusMsgId) {
+      await bot.editMessageText(`⏳ استلمت (${items.length}) ملفات. عم ادمجهم لأرفعهم بضربة وحدة...`, { chat_id: chatId, message_id: queueData.statusMsgId }).catch(()=>{});
+    }
 
-    let sha = null;
-    try {
-      const checkRes = await axios.get(`https://api.github.com/repos/${ghUser}/${repo}/contents/${current.finalPath}`, { headers: ghHeaders });
-      sha = checkRes.data.sha;
-    } catch (e) {}
+    const repoInfo = await axios.get(`https://api.github.com/repos/${ghUser}/${repo}`, { headers: ghHeaders });
+    const branch = repoInfo.data.default_branch || "main";
+    const refInfo = await axios.get(`https://api.github.com/repos/${ghUser}/${repo}/git/refs/heads/${branch}`, { headers: ghHeaders });
+    const baseCommitSha = refInfo.data.object.sha;
 
-    const payload = { message: `تحديث ${current.rawFileName}`, content: base64Content };
-    if (sha) payload.sha = sha;
+    let tree = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (i % 3 === 0) {
+         bot.editMessageText(`⏳ جاري تجهيز الملفات لغيتهوب (${i + 1}/${items.length})...`, { chat_id: chatId, message_id: queueData.statusMsgId }).catch(()=>{});
+      }
+      
+      const fileUrl = await bot.getFileLink(item.fileId);
+      const response = await axios.get(fileUrl, { responseType: 'arraybuffer' });
+      const base64Content = Buffer.from(response.data).toString('base64');
+      
+      const blobRes = await axios.post(`https://api.github.com/repos/${ghUser}/${repo}/git/blobs`, { content: base64Content, encoding: 'base64' }, { headers: ghHeaders });
+      tree.push({ path: item.finalPath, mode: '100644', type: 'blob', sha: blobRes.data.sha });
+    }
 
-    await axios.put(`https://api.github.com/repos/${ghUser}/${repo}/contents/${current.finalPath}`, payload, { headers: ghHeaders });
-    
-    const remaining = queueData.items.length;
-    bot.editMessageText(`⏳ جاري الرفع...\nالملف الحالي: \`${current.rawFileName}\`\nالباقي في الطابور: \`${remaining}\` ملفات`, {
-      chat_id: chatId, message_id: queueData.statusMsgId, parse_mode: "Markdown"
+    const treeRes = await axios.post(`https://api.github.com/repos/${ghUser}/${repo}/git/trees`, { base_tree: baseCommitSha, tree }, { headers: ghHeaders });
+    const commitRes = await axios.post(`https://api.github.com/repos/${ghUser}/${repo}/git/commits`, { message: `📦 تحديث ${items.length} ملفات دفعة وحدة`, tree: treeRes.data.sha, parents: [baseCommitSha] }, { headers: ghHeaders });
+    await axios.patch(`https://api.github.com/repos/${ghUser}/${repo}/git/refs/heads/${branch}`, { sha: commitRes.data.sha }, { headers: ghHeaders });
+
+    bot.editMessageText(`✅ **تم تحديث واستبدال (${items.length}) ملفات بنجاح بـ Commit واحد!** 🚀`, {
+      chat_id: chatId, message_id: queueData.statusMsgId, parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع للمستودع", callback_data: `repo:${repo}` }]] }
     }).catch(()=>{});
 
   } catch (err) {
-    console.log(`فشل رفع ${current.rawFileName}:`, err.message);
+    bot.editMessageText(`❌ فشل رفع الدفعة: ${err.message}`, { chat_id: chatId, message_id: queueData.statusMsgId }).catch(()=>{});
   }
-
-  setTimeout(() => {
-    processQueue(chatId, repo);
-  }, 1500);
 }
 
 bot.onText(/\/start/, async (msg) => {
@@ -140,7 +139,7 @@ bot.on('callback_query', async (query) => {
     userState.action = action;
     userState.time = Date.now();
 
-    if (action === "upload") bot.sendMessage(chatId, `📌 **وضع الرفع الجماعي مفعل لـ:** \`${repo}\`\n\n👇 حدد أي عدد بدك ياه من الملفات (حتى لو 100) وبعتهن دفعة وحدة. البوت رح يرتبهم ويرفعهم لحاله!`, { parse_mode: "Markdown" });
+    if (action === "upload") bot.sendMessage(chatId, `📌 **وضع الرفع الجماعي مفعل لـ:** \`${repo}\`\n\n👇 حدد أي عدد بدك ياه من الملفات (حتى لو 100) وبعتهن دفعة وحدة!`, { parse_mode: "Markdown" });
     else if (action === "zip") bot.sendMessage(chatId, `📌 **رفع وفك ZIP** 📦 لـ: \`${repo}\`\n\n👇 ابعت ملف الـ ZIP مباشرة.`, { parse_mode: "Markdown" });
     else if (action === "newfile") bot.sendMessage(chatId, `📌 **إنشاء ملف كود** في: \`${repo}\`\n\n👇 اعمل رد (Reply) واكتب:\nاسم_الملف.html\nالكود بالسطر الثاني`, { reply_markup: { force_reply: true } });
     else if (action === "newdir") bot.sendMessage(chatId, `📌 **إنشاء مجلد** في: \`${repo}\`\n\n👇 اعمل رد واكتب اسم المجلد.`, { reply_markup: { force_reply: true } });
@@ -180,27 +179,33 @@ bot.on('message', async (msg) => {
       if (fileObj.file_size > 20971520) return bot.sendMessage(chatId, `❌ الملف أكبر من 20 ميغا.`);
       
       let rawFileName = fileObj.file_name || `file_${Date.now()}`;
-      // مسح الأرقام اللي بيضيفها تلغرام متل (1) و (2) لاستبدال الملف الأصلي
-      rawFileName = rawFileName.replace(/\s\(\d+\)/g, '');
+      // السحر هون: مسح الأقواس والأرقام متل (1) و (2)
+      rawFileName = rawFileName.replace(/\s*\(\d+\)/g, '');
       
       const customPath = (msg.caption || userState.path || "").trim();
       const finalPath = customPath ? `${customPath}/${rawFileName}` : rawFileName;
 
       if (!uploadQueues.has(chatId)) {
-        uploadQueues.set(chatId, { items: [], statusMsgId: null, isProcessing: false });
+        uploadQueues.set(chatId, { items: [], timer: null, statusMsgId: null });
       }
 
       const queueData = uploadQueues.get(chatId);
-      // حجز مكان بالطابور فوراً من دون انتظار التنزيل
       queueData.items.push({ fileId: fileObj.file_id, rawFileName, finalPath });
 
-      if (!queueData.isProcessing) {
-        queueData.isProcessing = true;
-        bot.sendMessage(chatId, `⏳ جاري استلام الملفات وبدء الطابور...`).then(statusMsg => {
-          queueData.statusMsgId = statusMsg.message_id;
-          processQueue(chatId, repo);
+      // تصفير العداد مع كل ملف جديد بيوصل
+      if (queueData.timer) clearTimeout(queueData.timer);
+
+      if (!queueData.statusMsgId) {
+        bot.sendMessage(chatId, `⏳ عم استلم الملفات... رح استنى شوي لتكتمل الدفعة...`).then(msg => {
+          queueData.statusMsgId = msg.message_id;
         });
       }
+
+      // بعد 3.5 ثواني من آخر ملف بيوصل، البوت بيقفل الطابور وبيرفعهم دفعة وحدة
+      queueData.timer = setTimeout(() => {
+        processAlbumAsOneCommit(chatId, repo, queueData);
+      }, 3500);
+
       return;
     }
 
@@ -228,6 +233,8 @@ bot.on('message', async (msg) => {
     bot.sendMessage(chatId, `❌ خطأ: ${err.message}`);
   }
 });
+
+// ================== دوال غيتهوب الأساسية ==================
 
 async function createNewRepository(chatId, repoName, msgId) {
   try {
@@ -407,6 +414,7 @@ async function emptyRepository(chatId, repo, msgId) {
     bot.editMessageText(`❌ فشلت الفرمتة.`, { chat_id: chatId, message_id: msgId });
   }
 }
+
 process.on('uncaughtException', function (err) {
   console.log('تم منع جلطة بالسيرفر (Exception): ', err.message);
 });

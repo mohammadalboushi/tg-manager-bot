@@ -223,7 +223,7 @@ bot.on('message', async (msg) => {
         const statusMsg = await bot.sendMessage(chatId, `⏳ جاري إنشاء المجلد...`);
         await executeGitHubAction(chatId, repo, path, Buffer.from("").toString('base64'), statusMsg.message_id);
       }
-      else if (parent.includes("حذف ملف أو مجلد")) {
+      else if (parent.includes("حذف ملف/مجلد")) {
         const path = msg.text.trim();
         const statusMsg = await bot.sendMessage(chatId, `⏳ جاري الحذف...`);
         await processDelete(chatId, repo, path, statusMsg.message_id);

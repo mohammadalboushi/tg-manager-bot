@@ -10,6 +10,12 @@ const ghUser = process.env.GITHUB_USERNAME;
 
 const bot = new TelegramBot(token, { polling: true });
 
+// منع توقف البوت عند تشغيل نسختين معاً أثناء التحديث (تجاهل خطأ 409)
+bot.on("polling_error", (err) => {
+  if (err.message && err.message.includes("409 Conflict")) return;
+  console.log("Polling Error:", err.message);
+});
+
 // مسح الويب هوك من ذاكرة تلغرام فوراً لتجنب تعارض الأنظمة
 bot.deleteWebHook().catch(() => {});
 

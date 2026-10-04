@@ -8,25 +8,20 @@ const adminId = process.env.ADMIN_ID;
 const ghToken = process.env.GITHUB_TOKEN;
 const ghUser = process.env.GITHUB_USERNAME;
 
-const bot = new TelegramBot(token);
-const url = "https://tg-manager-bot-zwuv.onrender.com";
+const bot = new TelegramBot(token, { polling: true });
 
-bot.setWebHook(`${url}/bot${token}`);
+// مسح الويب هوك من ذاكرة تلغرام فوراً لتجنب تعارض الأنظمة
+bot.deleteWebHook().catch(() => {});
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.use(express.json());
-
-app.post(`/bot${token}`, (req, res) => {
-  bot.processUpdate(req.body);
-  res.sendStatus(200);
-});
-
-app.get('/', (req, res) => res.send('البوت شغال بنظام الـ Webhook 100% 🚀'));
-
+app.get('/', (req, res) => res.send('البوت شغال 100% 🚀'));
 app.listen(port, () => {
   console.log("Server running on port " + port);
+  setInterval(() => {
+    axios.get("https://tg-manager-bot-zwuv.onrender.com").catch(() => {});
+  }, 10 * 60 * 1000);
 });
 
 const ghHeaders = {

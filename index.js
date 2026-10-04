@@ -139,7 +139,13 @@ bot.on('callback_query', async (query) => {
     userState.action = action;
     userState.time = Date.now();
 
-    if (action === "upload") bot.sendMessage(chatId, `📌 **وضع الرفع الجماعي مفعل لـ:** \`${repo}\`\n\n👇 حدد أي عدد بدك ياه من الملفات (حتى لو 100) وبعتهن دفعة وحدة!`, { parse_mode: "Markdown" });
+        if (action === "upload") {
+      userState.path = "";
+      bot.sendMessage(chatId, `📌 **الرفع للمسار الرئيسي مفعل لـ:** \`${repo}\`\n\n👇 حدد أي عدد بدك ياه من الملفات وبعتهن دفعة وحدة!`, { parse_mode: "Markdown" });
+    }
+    else if (action === "upload_folder") {
+      bot.sendMessage(chatId, `📌 **رفع بداخل مجلد** في: \`${repo}\`\n\n👇 اعمل رد (Reply) على هي الرسالة واكتب اسم المجلد اللي بدك ترفع عليه (مثلاً \`api\`):`, { parse_mode: "Markdown", reply_markup: { force_reply: true } });
+    }
     else if (action === "zip") bot.sendMessage(chatId, `📌 **رفع وفك ZIP** 📦 لـ: \`${repo}\`\n\n👇 ابعت ملف الـ ZIP مباشرة.`, { parse_mode: "Markdown" });
     else if (action === "newfile") bot.sendMessage(chatId, `📌 **إنشاء ملف كود** في: \`${repo}\`\n\n👇 اعمل رد (Reply) واكتب:\nاسم_الملف.html\nالكود بالسطر الثاني`, { reply_markup: { force_reply: true } });
     else if (action === "newdir") bot.sendMessage(chatId, `📌 **إنشاء مجلد** في: \`${repo}\`\n\n👇 اعمل رد واكتب اسم المجلد.`, { reply_markup: { force_reply: true } });
@@ -211,7 +217,11 @@ bot.on('message', async (msg) => {
 
     if (isReply && msg.text) {
       const parent = isReply.text || "";
-      if (parent.includes("إنشاء ملف كود")) {
+      if (parent.includes("رفع بداخل مجلد")) {
+        userState.path = msg.text.trim();
+        bot.sendMessage(chatId, `✅ تم تعيين مسار الرفع إلى: \`${userState.path}\`\n👇 ابعت ملفاتك هلق (حتى كدفعة واحدة) ورح تنزل بقلبه مباشرة.`, { parse_mode: "Markdown" });
+      }
+      else if (parent.includes("إنشاء ملف كود")) {
         const lines = msg.text.split("\n");
         const path = lines[0].trim();
         const content = lines.slice(1).join("\n");
@@ -297,9 +307,9 @@ async function sendReposMenu(chatId, page, messageId = null) {
 
 async function sendRepoOptions(chatId, repoName, messageId) {
   const keyboard = [
-    [{ text: "📤 رفع ملفات", callback_data: `act:upload:${repoName}` }, { text: "📦 رفع وفك ZIP", callback_data: `act:zip:${repoName}` }],
-    [{ text: "📄 إنشاء ملف", callback_data: `act:newfile:${repoName}` }, { text: "📁 إنشاء مجلد", callback_data: `act:newdir:${repoName}` }],
-    [{ text: "🗑️ حذف ملف/مجلد", callback_data: `act:delete:${repoName}` }],
+    [{ text: "📤 رفع للمسار الرئيسي", callback_data: `act:upload:${repoName}` }, { text: "📂 رفع بداخل مجلد", callback_data: `act:upload_folder:${repoName}` }],
+    [{ text: "📦 رفع وفك ZIP", callback_data: `act:zip:${repoName}` }, { text: "📄 إنشاء ملف", callback_data: `act:newfile:${repoName}` }],
+    [{ text: "📁 إنشاء مجلد", callback_data: `act:newdir:${repoName}` }, { text: "🗑️ حذف ملف/مجلد", callback_data: `act:delete:${repoName}` }],
     [{ text: "💣 فرمتة المستودع", callback_data: `confirm_empty:${repoName}` }],
     [{ text: "🧨 حذف المستودع نهائياً", callback_data: `confirm_delete_repo:${repoName}` }],
     [{ text: "🔙 رجوع للقائمة", callback_data: `page:1` }]

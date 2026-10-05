@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "build": "pip3 install -U yt-dlp",
+    "build": "pip3 install -U yt-dlp --break-system-packages",
     "start": "node index.js"
   },
   "dependencies": {

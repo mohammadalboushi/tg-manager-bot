@@ -414,7 +414,7 @@ async function handleMessage(msg) {
 async function trackCommitStatus(chatId, repo, sha, actionName) {
   const startTime = Date.now();
   const maxWait = 5 * 60 * 1000; // أقصى حد للمراقبة 5 دقايق
-  const interval = 15 * 1000; // بيفحص كل 15 ثانية
+  const interval = 30 * 1000; // بيفحص كل 30 ثانية (آمن جداً)
 
   const timer = setInterval(async () => {
     try {

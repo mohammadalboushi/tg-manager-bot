@@ -1,9 +1,8 @@
-const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const { exec } = require('child_process');
 
 const userLinks = new Map();
-
-const RAPID_API_KEY = "1aec64407fmsha5c87fdf0cdb4fdp1815a8jsn26a2b2e13f13";
-const RAPID_API_HOST = "zm-api.p.rapidapi.com";
 
 async function handleMediaLink(bot, msg) {
   const chatId = msg.chat.id;
@@ -32,62 +31,49 @@ async function handleCallback(bot, query) {
     return bot.editMessageText(`❌ الرابط مفقود، ارجع ابعته مرة تانية.`, { chat_id: chatId, message_id: msgId });
   }
 
-  bot.editMessageText(`⏳ جاري المعالجة عبر سيرفر ZM الآمن...`, { chat_id: chatId, message_id: msgId });
+  const isAudio = data === "dl_audio";
+  bot.editMessageText(`⏳ جاري المعالجة والتحميل...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
 
-  try {
-    // التوجيه للـ Endpoint الصحيح الخاص بالتحميل في ZM API
-    const options = {
-      method: 'GET',
-      url: `https://${RAPID_API_HOST}/media/social/download`,
-      params: { url: url },
-      headers: {
-        'x-rapidapi-key': RAPID_API_KEY,
-        'x-rapidapi-host': RAPID_API_HOST
-      }
-    };
+  const fileName = `media_${Date.now()}`;
+  const ext = isAudio ? 'mp3' : 'mp4';
+  const filePath = path.join(__dirname, `${fileName}.${ext}`);
 
-    const response = await axios.request(options);
-    const resData = response.data;
-
-    let downloadUrl = null;
-    const isAudio = data === "dl_audio";
-
-    // استخراج الروابط من الاستجابة حسب هيكلة ZM API
-    if (resData.medias && Array.isArray(resData.medias)) {
-      if (isAudio) {
-        const audioItem = resData.medias.find(m => m.type === "audio") || resData.medias.find(m => m.extension === "mp3");
-        if (audioItem) downloadUrl = audioItem.url;
-      } else {
-        const videoItem = resData.medias.find(m => m.type === "video") || resData.medias[0];
-        if (videoItem) downloadUrl = videoItem.url;
-      }
-    }
-
-    if (!downloadUrl) {
-      downloadUrl = resData.url || resData.download_url || (resData.data && resData.data.url);
-    }
-
-    if (!downloadUrl) throw new Error("تعذر استخراج رابط التحميل من الاستجابة.");
-
-    bot.editMessageText(`🚀 جاري الإرسال لتليجرام...`, { chat_id: chatId, message_id: msgId });
-
-    if (isAudio) {
-      await bot.sendAudio(chatId, downloadUrl, { caption: "🎵 تم التحميل بواسطة بوت أبو فايز" });
-    } else {
-      await bot.sendVideo(chatId, downloadUrl, { caption: "🎥 تم التحميل بواسطة بوت أبو فايز" });
-    }
-
-    bot.deleteMessage(chatId, msgId).catch(() => {});
-
-  }чает (error) {
-    let errorMsg = "عذراً، فشل التحميل.";
-    if (error.response && error.response.data && error.response.data.message) {
-      errorMsg = error.response.data.message;
-    } else if (error.message) {
-      errorMsg = error.message;
-    }
-    bot.editMessageText(`❌ ${errorMsg}`, { chat_id: chatId, message_id: msgId });
+  const ytArgs = '--extractor-args "youtube:player_client=android"';
+  
+  let command = '';
+  if (isAudio) {
+    command = `yt-dlp ${ytArgs} -x --audio-format mp3 -o "${filePath}" "${url}"`;
+  } else {
+    command = `yt-dlp ${ytArgs} -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" -o "${filePath}" "${url}"`;
   }
+
+  exec(command, async (error, stdout, stderr) => {
+    if (error) {
+      console.error(`yt-dlp error: ${error.message}`);
+      return bot.editMessageText(`❌ فشل التحميل بسبب حماية يوتيوب.`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
+    }
+
+    bot.editMessageText(`🚀 جاري الإرسال لتليجرام...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
+
+    try {
+      if (isAudio) {
+        await bot.sendAudio(chatId, filePath, { caption: "🎵 تم التحميل بواسطة بوت أبو فايز" });
+      } else {
+        await bot.sendVideo(chatId, filePath, { caption: "🎥 تم التحميل بواسطة بوت أبو فايز" });
+      }
+      
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+      bot.deleteMessage(chatId, msgId).catch(() => {});
+    } catch (sendError) {
+      console.error(sendError);
+      bot.editMessageText(`❌ فشل إرسال الملف.`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+  });
 }
 
 module.exports = { handleMediaLink, handleCallback };

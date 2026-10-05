@@ -32,19 +32,21 @@ async function handleCallback(bot, query) {
   bot.editMessageText(`⏳ جاري المعالجة وسحب الملف...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
 
   try {
-    const response = await axios.post('https://api.cobalt.tools/api/json', {
+    // استخدام سيرفر بديل ومستقر لخدمة Cobalt
+    const response = await axios.post('https://co.wuk.sh/api/json', {
       url: url,
       isAudioOnly: isAudio
     }, {
       headers: {
         'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'Content-Type': 'application/json'
       }
     });
 
-    const downloadUrl = response.data.url;
-    if (!downloadUrl) throw new Error("لم يتم العثور على رابط");
+    const resData = response.data;
+    let downloadUrl = resData.url || (resData.picker && resData.picker[0] && resData.picker[0].url);
+
+    if (!downloadUrl) throw new Error("لم يتم العثور على رابط التحميل");
 
     bot.editMessageText(`🚀 جاري الإرسال لتليجرام...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
 
@@ -57,7 +59,7 @@ async function handleCallback(bot, query) {
     bot.deleteMessage(chatId, msgId).catch(() => {});
   } catch (error) {
     console.error(error.message);
-    bot.editMessageText(`❌ فشل التحميل من السيرفر. جرب رابط تاني.`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
+    bot.editMessageText(`❌ فشل التحميل. تأكد من الرابط وجرب مرة ثانية.`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
   }
 }
 

@@ -2,9 +2,6 @@ const axios = require('axios');
 
 const userLinks = new Map();
 
-const RAPID_API_KEY = "1aec64407fmsha5c87fdf0cdb4fdp1815a8jsn26a2b2e13f13";
-const RAPID_API_HOST = "zm-api.p.rapidapi.com";
-
 async function handleMediaLink(bot, msg) {
   const chatId = msg.chat.id;
   const url = msg.text.trim();
@@ -32,43 +29,27 @@ async function handleCallback(bot, query) {
     return bot.editMessageText(`❌ الرابط مفقود، ارجع ابعته مرة تانية.`, { chat_id: chatId, message_id: msgId });
   }
 
-  bot.editMessageText(`⏳ جاري تجهيز الرابط وسحب الميديا...`, { chat_id: chatId, message_id: msgId });
+  bot.editMessageText(`⏳ جاري سحب الميديا بمعالجة فائقة السرعة...`, { chat_id: chatId, message_id: msgId });
 
   try {
-    const options = {
-      method: 'GET',
-      url: `https://${RAPID_API_HOST}/download`,
-      params: { url: url },
-      headers: {
-        'x-rapidapi-key': RAPID_API_KEY,
-        'x-rapidapi-host': RAPID_API_HOST
-      }
-    };
-
-    const response = await axios.request(options);
-    const resData = response.data;
-
-    let downloadUrl = null;
     const isAudio = data === "dl_audio";
 
-    if (isAudio) {
-      if (resData.medias && Array.isArray(resData.medias)) {
-        const audioItem = resData.medias.find(m => m.type === "audio") || resData.medias.find(m => m.extension === "mp3");
-        if (audioItem) downloadUrl = audioItem.url;
+    // استخدام سيرفر مجاني وقوي جداً يدعم كافة المنصات بدون مفاتيح
+    const response = await axios.post('https://co.wukko.me/api/json', {
+      url: url,
+      isAudioOnly: isAudio,
+      aFormat: "mp3"
+    }, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0'
       }
-      if (!downloadUrl && resData.audio) downloadUrl = resData.audio;
-    }
+    });
 
-    if (!downloadUrl && resData.medias && Array.isArray(resData.medias)) {
-      const videoItem = resData.medias.find(m => m.type === "video") || resData.medias[0];
-      if (videoItem) downloadUrl = videoItem.url;
-    }
+    const downloadUrl = response.data.url;
 
-    if (!downloadUrl) {
-      downloadUrl = resData.url || resData.download_url;
-    }
-
-    if (!downloadUrl) throw new Error("تعذر استخراج رابط التحميل من هذا الرابط.");
+    if (!downloadUrl) throw new Error("تعذر استخراج رابط التحميل.");
 
     bot.editMessageText(`🚀 جاري الإرسال لتليجرام...`, { chat_id: chatId, message_id: msgId });
 
@@ -82,8 +63,8 @@ async function handleCallback(bot, query) {
 
   } catch (error) {
     let errorMsg = "عذراً، فشل التحميل.";
-    if (error.response && error.response.data && error.response.data.message) {
-      errorMsg = error.response.data.message;
+    if (error.response && error.response.data && error.response.data.text) {
+      errorMsg = error.response.data.text;
     } else if (error.message) {
       errorMsg = error.message;
     }

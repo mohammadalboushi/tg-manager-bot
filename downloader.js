@@ -37,23 +37,41 @@ async function handleCallback(bot, query) {
   const quality = data === "dl_video_1080" ? "1080" : "720";
 
   try {
-    // استخدام API مجانية وسريعة جداً (Cobalt) لا تستهلك أي موارد من سيرفرك
-    const response = await axios.post('https://api.cobalt.tools/api/json', {
-      url: url,
-      vQuality: quality,
-      isAudioOnly: isAudio,
-      aFormat: "mp3"
-    }, {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+    // قائمة سيرفرات بديلة (Community Instances) عشان إذا واحد وقف يشتغل الثاني تلقائياً
+    const fallbackApis = [
+      'https://cobalt.q-n.space/api/json',
+      'https://api.cobalt.zipline.duti.dev/api/json',
+      'https://cobalt.my.to/api/json',
+      'https://co.wukko.me/api/json'
+    ];
+
+    let fileUrl = null;
+
+    for (let api of fallbackApis) {
+      try {
+        const response = await axios.post(api, {
+          url: url,
+          vQuality: quality,
+          isAudioOnly: isAudio,
+          aFormat: "mp3"
+        }, {
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+          }
+        });
+
+        if (response.data && response.data.url) {
+          fileUrl = response.data.url;
+          break; // إذا نجحنا وحصلنا الرابط، نوقف البحث
+        }
+      } catch (err) {
+        // تجاهل الخطأ وانتقل للسيرفر اللي بعده بصمت
       }
-    });
+    }
 
-    const fileUrl = response.data.url;
-
-    if (!fileUrl) throw new Error("لم أتمكن من استخراج الرابط المباشر للملف.");
+    if (!fileUrl) throw new Error("كل السيرفرات المجانية مشغولة أو متوقفة حالياً، جرب بعد شوي.");
 
     bot.editMessageText(`🚀 جاري الإرسال لتليجرام... (ثواني وبيوصلك)`, { chat_id: chatId, message_id: msgId });
 

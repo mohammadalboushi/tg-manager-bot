@@ -1,4 +1,5 @@
-const axios = require('axios');
+const { execSync } = require('child_process');
+const youtubedl = require('youtube-dl-exec');
 
 const userLinks = new Map();
 
@@ -29,27 +30,26 @@ async function handleCallback(bot, query) {
     return bot.editMessageText(`❌ الرابط مفقود، ارجع ابعته مرة تانية.`, { chat_id: chatId, message_id: msgId });
   }
 
-  bot.editMessageText(`⏳ جاري سحب الميديا بمعالجة فائقة السرعة...`, { chat_id: chatId, message_id: msgId });
+  bot.editMessageText(`⏳ جاري المعالجة وسحب الملف...`, { chat_id: chatId, message_id: msgId });
 
   try {
     const isAudio = data === "dl_audio";
-
-    // استخدام سيرفر مجاني وقوي جداً يدعم كافة المنصات بدون مفاتيح
-    const response = await axios.post('https://co.wukko.me/api/json', {
-      url: url,
-      isAudioOnly: isAudio,
-      aFormat: "mp3"
-    }, {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0'
-      }
+    
+    // سحب الرابط المباشر بأحدث إعدادات متوافقة
+    const output = await youtubedl(url, {
+      dumpSingleJson: true,
+      noWarnings: true,
+      noCheckCertificates: true,
+      preferFreeFormats: true,
+      format: isAudio ? 'bestaudio' : 'best'
     });
 
-    const downloadUrl = response.data.url;
+    let downloadUrl = output.url;
+    if (!downloadUrl && output.requested_downloads) {
+      downloadUrl = output.requested_downloads[0].url;
+    }
 
-    if (!downloadUrl) throw new Error("تعذر استخراج رابط التحميل.");
+    if (!downloadUrl) throw new Error("تعذر استخراج الرابط المباشر.");
 
     bot.editMessageText(`🚀 جاري الإرسال لتليجرام...`, { chat_id: chatId, message_id: msgId });
 
@@ -62,13 +62,8 @@ async function handleCallback(bot, query) {
     bot.deleteMessage(chatId, msgId).catch(() => {});
 
   } catch (error) {
-    let errorMsg = "عذراً، فشل التحميل.";
-    if (error.response && error.response.data && error.response.data.text) {
-      errorMsg = error.response.data.text;
-    } else if (error.message) {
-      errorMsg = error.message;
-    }
-    bot.editMessageText(`❌ ${errorMsg}`, { chat_id: chatId, message_id: msgId });
+    let errMsg = error.message ? error.message.split('\n')[0] : "فشل التحميل";
+    bot.editMessageText(`❌ عذراً: ${errMsg}`, { chat_id: chatId, message_id: msgId });
   }
 }
 

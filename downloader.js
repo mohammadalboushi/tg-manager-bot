@@ -37,7 +37,7 @@ async function handleCallback(bot, query) {
   try {
     const options = {
       method: 'GET',
-      url: `https://${RAPID_API_HOST}/`,
+      url: `https://${RAPID_API_HOST}/download`,
       params: { url: url },
       headers: {
         'x-rapidapi-key': RAPID_API_KEY,

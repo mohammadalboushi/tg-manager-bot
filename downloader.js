@@ -2,17 +2,21 @@ const axios = require('axios');
 
 const userLinks = new Map();
 
+const RAPID_API_KEY = "1aec64407fmsha5c87fdf0cdb4fdp1815a8jsn26a2b2e13f13";
+const RAPID_API_HOST = "zm-api.p.rapidapi.com";
+
 async function handleMediaLink(bot, msg) {
   const chatId = msg.chat.id;
   const url = msg.text.trim();
+
   userLinks.set(chatId, url);
 
   const keyboard = [
-    [{ text: "🎥 فيديو", callback_data: `dl_video` }],
-    [{ text: "🎵 صوت", callback_data: `dl_audio` }]
+    [{ text: "🎥 فيديو (MP4)", callback_data: `dl_video` }],
+    [{ text: "🎵 صوت (MP3)", callback_data: `dl_audio` }]
   ];
 
-  bot.sendMessage(chatId, `📌 **استلمت الرابط:**\nشو حابب تنزل يا أبو فايز؟`, {
+  bot.sendMessage(chatId, `📌 **استلمت الرابط:**\nشو الصيغة اللي حابب تنزلها يا أبو فايز؟`, {
     parse_mode: "Markdown",
     reply_markup: { inline_keyboard: keyboard }
   });
@@ -28,38 +32,61 @@ async function handleCallback(bot, query) {
     return bot.editMessageText(`❌ الرابط مفقود، ارجع ابعته مرة تانية.`, { chat_id: chatId, message_id: msgId });
   }
 
-  const isAudio = data === "dl_audio";
-  bot.editMessageText(`⏳ جاري المعالجة وسحب الملف...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
+  bot.editMessageText(`⏳ جاري المعالجة عبر سيرفر ZM الآمن...`, { chat_id: chatId, message_id: msgId });
 
   try {
-    // استخدام سيرفر بديل ومستقر لخدمة Cobalt
-    const response = await axios.post('https://co.wuk.sh/api/json', {
-      url: url,
-      isAudioOnly: isAudio
-    }, {
+    // التوجيه للـ Endpoint الصحيح الخاص بالتحميل في ZM API
+    const options = {
+      method: 'GET',
+      url: `https://${RAPID_API_HOST}/media/social/download`,
+      params: { url: url },
       headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
+        'x-rapidapi-key': RAPID_API_KEY,
+        'x-rapidapi-host': RAPID_API_HOST
       }
-    });
+    };
 
+    const response = await axios.request(options);
     const resData = response.data;
-    let downloadUrl = resData.url || (resData.picker && resData.picker[0] && resData.picker[0].url);
 
-    if (!downloadUrl) throw new Error("لم يتم العثور على رابط التحميل");
+    let downloadUrl = null;
+    const isAudio = data === "dl_audio";
 
-    bot.editMessageText(`🚀 جاري الإرسال لتليجرام...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
+    // استخراج الروابط من الاستجابة حسب هيكلة ZM API
+    if (resData.medias && Array.isArray(resData.medias)) {
+      if (isAudio) {
+        const audioItem = resData.medias.find(m => m.type === "audio") || resData.medias.find(m => m.extension === "mp3");
+        if (audioItem) downloadUrl = audioItem.url;
+      } else {
+        const videoItem = resData.medias.find(m => m.type === "video") || resData.medias[0];
+        if (videoItem) downloadUrl = videoItem.url;
+      }
+    }
+
+    if (!downloadUrl) {
+      downloadUrl = resData.url || resData.download_url || (resData.data && resData.data.url);
+    }
+
+    if (!downloadUrl) throw new Error("تعذر استخراج رابط التحميل من الاستجابة.");
+
+    bot.editMessageText(`🚀 جاري الإرسال لتليجرام...`, { chat_id: chatId, message_id: msgId });
 
     if (isAudio) {
       await bot.sendAudio(chatId, downloadUrl, { caption: "🎵 تم التحميل بواسطة بوت أبو فايز" });
     } else {
       await bot.sendVideo(chatId, downloadUrl, { caption: "🎥 تم التحميل بواسطة بوت أبو فايز" });
     }
-    
+
     bot.deleteMessage(chatId, msgId).catch(() => {});
-  } catch (error) {
-    console.error(error.message);
-    bot.editMessageText(`❌ فشل التحميل. تأكد من الرابط وجرب مرة ثانية.`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
+
+  }чает (error) {
+    let errorMsg = "عذراً، فشل التحميل.";
+    if (error.response && error.response.data && error.response.data.message) {
+      errorMsg = error.response.data.message;
+    } else if (error.message) {
+      errorMsg = error.message;
+    }
+    bot.editMessageText(`❌ ${errorMsg}`, { chat_id: chatId, message_id: msgId });
   }
 }
 

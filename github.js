@@ -53,10 +53,12 @@ async function processAlbumAsOneCommit(chatId, repo, queueData) {
     const commitRes = await axios.post(`https://api.github.com/repos/${ghUser}/${repo}/git/commits`, { message: `📦 تحديث ${items.length} ملفات دفعة وحدة`, tree: treeRes.data.sha, parents: [baseCommitSha] }, { headers: ghHeaders });
     await axios.patch(`https://api.github.com/repos/${ghUser}/${repo}/git/refs/heads/${branch}`, { sha: commitRes.data.sha }, { headers: ghHeaders });
 
-    bot.editMessageText(`✅ **تم تحديث واستبدال (${items.length}) ملفات بنجاح بـ Commit واحد!** 🚀`, {
+    bot.editMessageText(`✅ **تم تحديث واستبدال (${items.length}) ملفات بنجاح!** 🚀\n⏳ عم راقب غيتهوب لتخضرّ الإشارة...`, {
       chat_id: chatId, message_id: queueData.statusMsgId, parse_mode: "Markdown",
       reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع للمستودع", callback_data: `repo:${repo}` }]] }
     }).catch(()=>{});
+    
+    trackCommitStatus(chatId, repo, commitRes.data.sha, "تحديث دفعة ملفات");
 
   } catch (err) {
     bot.editMessageText(`❌ فشل رفع الدفعة: ${err.message}`, { chat_id: chatId, message_id: queueData.statusMsgId }).catch(()=>{});
@@ -157,10 +159,12 @@ async function extractAndUploadZip(chatId, repo, zipBuffer, msgId) {
     const commitRes = await axios.post(`https://api.github.com/repos/${ghUser}/${repo}/git/commits`, { message: "📦 رفع ZIP", tree: treeRes.data.sha, parents: [baseCommitSha] }, { headers: ghHeaders });
     await axios.patch(`https://api.github.com/repos/${ghUser}/${repo}/git/refs/heads/${branch}`, { sha: commitRes.data.sha }, { headers: ghHeaders });
 
-    bot.editMessageText(`✅ **تم رفع وفك ${tree.length} ملف بنجاح!** 🚀`, {
+    bot.editMessageText(`✅ **تم رفع وفك ${tree.length} ملف بنجاح!** 🚀\n⏳ عم راقب غيتهوب ليجهز الموقع...`, {
       chat_id: chatId, message_id: msgId, parse_mode: "Markdown",
       reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع للمستودع", callback_data: `repo:${repo}` }]] }
     });
+    
+    trackCommitStatus(chatId, repo, commitRes.data.sha, "رفع ملفات ZIP");
   } catch (e) {
     bot.editMessageText(`❌ خطأ بملف الـ ZIP: ${e.message}`, { chat_id: chatId, message_id: msgId });
   }
@@ -177,11 +181,15 @@ async function executeGitHubAction(chatId, repo, path, base64Content, msgId) {
     const payload = { message: "تحديث ملف", content: base64Content };
     if (sha) payload.sha = sha;
 
-    await axios.put(`https://api.github.com/repos/${ghUser}/${repo}/contents/${path}`, payload, { headers: ghHeaders });
-    bot.editMessageText(`✅ **تم حفظ \`${path}\` بنجاح!**`, {
+    const putRes = await axios.put(`https://api.github.com/repos/${ghUser}/${repo}/contents/${path}`, payload, { headers: ghHeaders });
+    bot.editMessageText(`✅ **تم حفظ \`${path}\` بنجاح!**\n⏳ عم راقب غيتهوب ليجهز التعديل...`, {
       chat_id: chatId, message_id: msgId, parse_mode: "Markdown",
       reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع للمستودع", callback_data: `repo:${repo}` }]] }
     });
+    
+    if (putRes.data && putRes.data.commit) {
+      trackCommitStatus(chatId, repo, putRes.data.commit.sha, `تحديث ${path}`);
+    }
   } catch (e) {
     bot.editMessageText(`❌ خطأ: ${e.message}`, { chat_id: chatId, message_id: msgId });
   }
@@ -400,6 +408,44 @@ async function handleMessage(msg) {
   } catch (err) {
     bot.sendMessage(chatId, `❌ خطأ: ${err.message}`);
   }
+}
+
+// دالة مراقبة حالة النقطة البرتقالية على غيتهوب
+async function trackCommitStatus(chatId, repo, sha, actionName) {
+  const startTime = Date.now();
+  const maxWait = 5 * 60 * 1000; // أقصى حد للمراقبة 5 دقايق
+  const interval = 15 * 1000; // بيفحص كل 15 ثانية
+
+  const timer = setInterval(async () => {
+    try {
+      if (Date.now() - startTime > maxWait) {
+        clearInterval(timer);
+        return;
+      }
+      
+      const res = await axios.get(`https://api.github.com/repos/${ghUser}/${repo}/commits/${sha}/check-runs`, { headers: ghHeaders });
+      const runs = res.data.check_runs;
+      
+      // إذا لسا ما بلش بناء نتجاهل الفحص ونستنى
+      if (!runs || runs.length === 0) return; 
+
+      // هل كل العمليات خلصت؟
+      const allCompleted = runs.every(run => run.status === 'completed');
+      
+      if (allCompleted) {
+        clearInterval(timer);
+        const allSuccess = runs.every(run => run.conclusion === 'success' || run.conclusion === 'neutral' || run.conclusion === 'skipped');
+        
+        if (allSuccess) {
+          bot.sendMessage(chatId, `🟢 **تحديث موقعك جاهز!**\nاكتمل (${actionName}) وصارت الإشارة خضراء. فيك تفوت ع الموقع هلأ.`, {parse_mode: "Markdown"});
+        } else {
+          bot.sendMessage(chatId, `🔴 **فشل في النشر!**\nعملية (${actionName}) عطت إشارة حمراء على غيتهوب.`, {parse_mode: "Markdown"});
+        }
+      }
+    } catch (e) {
+      // إذا صار خطأ بالاتصال منتجاهله ومنكمل فحص
+    }
+  }, interval);
 }
 
 // تصدير الدوال الأساسية للاندكس

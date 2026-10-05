@@ -2,6 +2,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const axios = require('axios');
 const AdmZip = require('adm-zip');
+const downloader = require('./downloader'); // ملف تحميل الميديا المستقل
 
 const token = process.env.BOT_TOKEN;
 const adminId = process.env.ADMIN_ID;
@@ -99,6 +100,11 @@ bot.on('callback_query', async (query) => {
 
   bot.answerCallbackQuery(query.id).catch(() => {});
 
+  // تحويل أزرار التحميل إلى الملف المستقل
+  if (data.startsWith("dl_")) {
+    return downloader.handleCallback(bot, query);
+  }
+
   if (data === "new_repo") {
     userState.action = "new_repo";
     bot.sendMessage(chatId, "📌 **إنشاء مستودع جديد**\n\n👇 اعمل رد (Reply) واكتب اسم المستودع (بالانجليزي بدون مسافات):", { reply_markup: { force_reply: true } });
@@ -166,6 +172,11 @@ bot.on('callback_query', async (query) => {
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   if (chatId.toString() !== adminId || msg.text === "/start") return;
+
+  // التقاط أي رسالة عبارة عن رابط وتحويلها لملف التحميل فوراً
+  if (msg.text && /^https?:\/\//i.test(msg.text.trim()) && !msg.reply_to_message) {
+    return downloader.handleMediaLink(bot, msg);
+  }
 
   const isReply = msg.reply_to_message;
   let fileObj = msg.document || msg.video || msg.audio;

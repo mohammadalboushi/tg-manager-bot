@@ -426,8 +426,14 @@ async function trackCommitStatus(chatId, repo, sha, actionName) {
       const res = await axios.get(`https://api.github.com/repos/${ghUser}/${repo}/commits/${sha}/check-runs`, { headers: ghHeaders });
       const runs = res.data.check_runs;
       
-      // إذا لسا ما بلش بناء نتجاهل الفحص ونستنى
-      if (!runs || runs.length === 0) return; 
+      // إذا مر 30 ثانية وما في بناء (المستودع ما فيه Pages أصلاً) ننهي العملية بإشعار نجاح
+      if (!runs || runs.length === 0) {
+        if (Date.now() - startTime >= interval) {
+          clearInterval(timer);
+          bot.sendMessage(chatId, `🟢 **تم تثبيت التعديل بنجاح!**\nاكتمل (${actionName}) وثبت على غيتهوب.`, { parse_mode: "Markdown" });
+        }
+        return;
+      }
 
       // هل كل العمليات خلصت؟
       const allCompleted = runs.every(run => run.status === 'completed');

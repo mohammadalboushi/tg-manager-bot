@@ -1,7 +1,9 @@
 const axios = require('axios');
 
-// تخزين الروابط مؤقتاً بالذاكرة بناءً على رقم الشات لتنفيذ التحميل
 const userLinks = new Map();
+
+const RAPID_API_KEY = "1aec64407fmsha5c87fdf0cdb4fdp1815a8jsn26a2b2e13f13";
+const RAPID_API_HOST = "auto-download-all-in-one.p.rapidapi.com";
 
 async function handleMediaLink(bot, msg) {
   const chatId = msg.chat.id;
@@ -15,7 +17,7 @@ async function handleMediaLink(bot, msg) {
     [{ text: "🎵 استخراج الصوت (MP3)", callback_data: `dl_audio` }]
   ];
 
-  bot.sendMessage(chatId, `📌 **استلمت الرابط:**\nشو الصيغة اللي حابب تنزله فيها يا أبو فايز؟`, {
+  bot.sendMessage(chatId, `📌 **استلمت الرابط:**\nشو الصيغة اللي حابب تنزلها يا أبو فايز؟`, {
     parse_mode: "Markdown",
     reply_markup: { inline_keyboard: keyboard }
   });
@@ -25,71 +27,74 @@ async function handleCallback(bot, query) {
   const chatId = query.message.chat.id;
   const msgId = query.message.message_id;
   const data = query.data;
-  
+
   const url = userLinks.get(chatId);
   if (!url) {
-    return bot.editMessageText(`❌ الرابط قديم أو مفقود من الذاكرة، ابعته مرة تانية.`, { chat_id: chatId, message_id: msgId });
+    return bot.editMessageText(`❌ الرابط مفقود، ارجع ابعته مرة تانية.`, { chat_id: chatId, message_id: msgId });
   }
 
-  bot.editMessageText(`⏳ جاري سحب الملف وفك تشفيره...`, { chat_id: chatId, message_id: msgId });
-
-  const isAudio = data === "dl_audio";
-  const quality = data === "dl_video_1080" ? "1080" : "720";
+  bot.editMessageText(`⏳ جاري تجهيز الرابط وسحب الميديا...`, { chat_id: chatId, message_id: msgId });
 
   try {
-    // قائمة سيرفرات بديلة (Community Instances) عشان إذا واحد وقف يشتغل الثاني تلقائياً
-    const fallbackApis = [
-      'https://cobalt.q-n.space/api/json',
-      'https://api.cobalt.zipline.duti.dev/api/json',
-      'https://cobalt.my.to/api/json',
-      'https://co.wukko.me/api/json'
-    ];
+    const options = {
+      method: 'POST',
+      url: `https://${RAPID_API_HOST}/`,
+      headers: {
+        'x-rapidapi-key': RAPID_API_KEY,
+        'x-rapidapi-host': RAPID_API_HOST,
+        'Content-Type': 'application/json'
+      },
+      data: { url: url }
+    };
 
-    let fileUrl = null;
+    const response = await axios.request(options);
+    const resData = response.data;
 
-    for (let api of fallbackApis) {
-      try {
-        const response = await axios.post(api, {
-          url: url,
-          vQuality: quality,
-          isAudioOnly: isAudio,
-          aFormat: "mp3"
-        }, {
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-          }
-        });
+    let downloadUrl = null;
+    const isAudio = data === "dl_audio";
 
-        if (response.data && response.data.url) {
-          fileUrl = response.data.url;
-          break; // إذا نجحنا وحصلنا الرابط، نوقف البحث
-        }
-      } catch (err) {
-        // تجاهل الخطأ وانتقل للسيرفر اللي بعده بصمت
+    // استخراج الرابط المباشر بحسب استجابة الـ API
+    if (isAudio) {
+      if (resData.medias) {
+        const audioItem = resData.medias.find(m => m.type === "audio") || resData.medias.find(m => m.extension === "mp3");
+        if (audioItem) downloadUrl = audioItem.url;
+      }
+      if (!downloadUrl && resData.audio) downloadUrl = resData.audio;
+    }
+
+    if (!downloadUrl && resData.medias && Array.isArray(resData.medias)) {
+      if (data === "dl_video_1080") {
+        const hd = resData.medias.find(m => m.quality === "1080p" || m.resolution === "1080p");
+        if (hd) downloadUrl = hd.url;
+      }
+      if (!downloadUrl) {
+        const videoItem = resData.medias.find(m => m.type === "video") || resData.medias[0];
+        if (videoItem) downloadUrl = videoItem.url;
       }
     }
 
-    if (!fileUrl) throw new Error("كل السيرفرات المجانية مشغولة أو متوقفة حالياً، جرب بعد شوي.");
+    if (!downloadUrl) {
+      downloadUrl = resData.url || resData.download_url || (resData.medias && resData.medias[0] ? resData.medias[0].url : null);
+    }
 
-    bot.editMessageText(`🚀 جاري الإرسال لتليجرام... (ثواني وبيوصلك)`, { chat_id: chatId, message_id: msgId });
+    if (!downloadUrl) throw new Error("تعذر استخراج رابط التحميل من المصدر.");
+
+    bot.editMessageText(`🚀 جاري الإرسال لتليجرام...`, { chat_id: chatId, message_id: msgId });
 
     if (isAudio) {
-      await bot.sendAudio(chatId, fileUrl, { caption: "🎵 تم التحميل بواسطة بوت أبو فايز" });
+      await bot.sendAudio(chatId, downloadUrl, { caption: "🎵 تم التحميل بواسطة بوت أبو فايز" });
     } else {
-      await bot.sendVideo(chatId, fileUrl, { caption: "🎥 تم التحميل بواسطة بوت أبو فايز" });
+      await bot.sendVideo(chatId, downloadUrl, { caption: "🎥 تم التحميل بواسطة بوت أبو فايز" });
     }
-    
-    // مسح رسالة التحميل لتنظيف الشات بعد النجاح
-    bot.deleteMessage(chatId, msgId).catch(()=>{});
+
+    bot.deleteMessage(chatId, msgId).catch(() => {});
 
   } catch (error) {
     let errorMsg = "عذراً، فشل التحميل.";
-    if (error.response && error.response.data && error.response.data.text) {
-        errorMsg = error.response.data.text;
+    if (error.response && error.response.data && error.response.data.message) {
+      errorMsg = error.response.data.message;
     } else if (error.message) {
-        errorMsg = error.message;
+      errorMsg = error.message;
     }
     bot.editMessageText(`❌ ${errorMsg}`, { chat_id: chatId, message_id: msgId });
   }

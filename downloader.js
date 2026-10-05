@@ -1,7 +1,9 @@
-const { execSync } = require('child_process');
-const youtubedl = require('youtube-dl-exec');
+const axios = require('axios');
 
 const userLinks = new Map();
+
+const RAPID_API_KEY = "1aec64407fmsha5c87fdf0cdb4fdp1815a8jsn26a2b2e13f13";
+const RAPID_API_HOST = "zm-api.p.rapidapi.com";
 
 async function handleMediaLink(bot, msg) {
   const chatId = msg.chat.id;
@@ -30,26 +32,42 @@ async function handleCallback(bot, query) {
     return bot.editMessageText(`❌ الرابط مفقود، ارجع ابعته مرة تانية.`, { chat_id: chatId, message_id: msgId });
   }
 
-  bot.editMessageText(`⏳ جاري المعالجة وسحب الملف...`, { chat_id: chatId, message_id: msgId });
+  bot.editMessageText(`⏳ جاري المعالجة عبر سيرفر ZM الآمن...`, { chat_id: chatId, message_id: msgId });
 
   try {
-    const isAudio = data === "dl_audio";
-    
-    // سحب الرابط المباشر بأحدث إعدادات متوافقة
-    const output = await youtubedl(url, {
-      dumpSingleJson: true,
-      noWarnings: true,
-      noCheckCertificates: true,
-      preferFreeFormats: true,
-      format: isAudio ? 'bestaudio' : 'best'
-    });
+    // التوجيه للـ Endpoint الصحيح الخاص بالتحميل في ZM API
+    const options = {
+      method: 'GET',
+      url: `https://${RAPID_API_HOST}/media/social/download`,
+      params: { url: url },
+      headers: {
+        'x-rapidapi-key': RAPID_API_KEY,
+        'x-rapidapi-host': RAPID_API_HOST
+      }
+    };
 
-    let downloadUrl = output.url;
-    if (!downloadUrl && output.requested_downloads) {
-      downloadUrl = output.requested_downloads[0].url;
+    const response = await axios.request(options);
+    const resData = response.data;
+
+    let downloadUrl = null;
+    const isAudio = data === "dl_audio";
+
+    // استخراج الروابط من الاستجابة حسب هيكلة ZM API
+    if (resData.medias && Array.isArray(resData.medias)) {
+      if (isAudio) {
+        const audioItem = resData.medias.find(m => m.type === "audio") || resData.medias.find(m => m.extension === "mp3");
+        if (audioItem) downloadUrl = audioItem.url;
+      } else {
+        const videoItem = resData.medias.find(m => m.type === "video") || resData.medias[0];
+        if (videoItem) downloadUrl = videoItem.url;
+      }
     }
 
-    if (!downloadUrl) throw new Error("تعذر استخراج الرابط المباشر.");
+    if (!downloadUrl) {
+      downloadUrl = resData.url || resData.download_url || (resData.data && resData.data.url);
+    }
+
+    if (!downloadUrl) throw new Error("تعذر استخراج رابط التحميل من الاستجابة.");
 
     bot.editMessageText(`🚀 جاري الإرسال لتليجرام...`, { chat_id: chatId, message_id: msgId });
 
@@ -61,9 +79,14 @@ async function handleCallback(bot, query) {
 
     bot.deleteMessage(chatId, msgId).catch(() => {});
 
-  } catch (error) {
-    let errMsg = error.message ? error.message.split('\n')[0] : "فشل التحميل";
-    bot.editMessageText(`❌ عذراً: ${errMsg}`, { chat_id: chatId, message_id: msgId });
+  }чает (error) {
+    let errorMsg = "عذراً، فشل التحميل.";
+    if (error.response && error.response.data && error.response.data.message) {
+      errorMsg = error.response.data.message;
+    } else if (error.message) {
+      errorMsg = error.message;
+    }
+    bot.editMessageText(`❌ ${errorMsg}`, { chat_id: chatId, message_id: msgId });
   }
 }
 

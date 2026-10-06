@@ -35,17 +35,15 @@ async function handleCallback(bot, query) {
     let downloadUrl = null;
     let mediaTitle = "صوتيات أبو فايز";
 
-    // معالجة خاصة لروابط سمول (Smule) بدون الحاجة لـ RapidAPI
+    // معالجة خاصة لروابط سمول (Smule) عبر بروكسي لتخطي حظر 403
     if (url.includes('smule.com')) {
-      const htmlRes = await axios.get(url, {
-        headers: { 
-          'User-Agent': 'Smule/10.1.3 (iPhone; iOS 16.5; Scale/3.00)',
-          'Referer': 'https://www.smule.com/',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-        },
-        timeout: 15000
-      });
-      const html = htmlRes.data;
+      const proxyUrl = `https://api.allorigins.win/get?disableCache=true&url=${encodeURIComponent(url)}`;
+      const htmlRes = await axios.get(proxyUrl, { timeout: 15000 });
+      
+      // البروكسي يعيد كود الـ HTML داخل متغير contents
+      const html = htmlRes.data.contents; 
+
+      if (!html) throw new Error("تعذر جلب محتوى الصفحة من البروكسي.");
 
       const audioMatch = html.match(/<meta\s+property="og:audio"\s+content="([^"]+)"/i) || html.match(/content="([^"]+)"\s+property="og:audio"/i);
       const videoMatch = html.match(/<meta\s+property="og:video"\s+content="([^"]+)"/i) || html.match(/content="([^"]+)"\s+property="og:video"/i);

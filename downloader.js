@@ -12,7 +12,7 @@ async function handleMediaLink(bot, msg) {
     [{ text: "🎵 صوت (MP3)", callback_data: `dl_audio` }]
   ];
 
-  bot.sendMessage(chatId, `📌 **استلمت الرابط:**\nشو حابب تجهز يا أبو فايز؟`, {
+  bot.sendMessage(chatId, `📌 **استلمت الرابط:**\nشو حابب تنزل يا أبو فايز؟`, {
     parse_mode: "Markdown",
     reply_markup: { inline_keyboard: keyboard }
   });
@@ -29,7 +29,7 @@ async function handleCallback(bot, query) {
   }
 
   const isAudio = data === "dl_audio";
-  bot.editMessageText(`⏳ جاري استخراج رابط التحميل الصافي...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
+  bot.editMessageText(`⏳ جاري جلب الفيديو من السيرفر...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
 
   try {
     const options = {
@@ -59,24 +59,47 @@ async function handleCallback(bot, query) {
       downloadUrl = resData.url;
     }
 
-    if (!downloadUrl) throw new Error("تعذر سحب الرابط من السيرفر.");
+    if (!downloadUrl) throw new Error("تعذر استخراج رابط التحميل.");
 
-    const titleText = resData.title ? `📌 **العنوان:** ${resData.title}\n\n` : '';
+    bot.editMessageText(`🚀 جاري الإرسال لتليجرام...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
 
-    await bot.editMessageText(`${titleText}✅ **تم تجهيز الرابط بنجاح!**\n👇 اضغط على الزر ليبدأ التحميل فوراً بجهازك:`, {
-      chat_id: chatId,
-      message_id: msgId,
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: isAudio ? "🎵 اضغط لتحميل الصوت (MP3)" : "🎥 اضغط لتحميل الفيديو (MP4)", url: downloadUrl }]
-        ]
+    const captionText = isAudio ? "🎵 تم التحميل بواسطة بوت أبو فايز" : "🎥 تم التحميل بواسطة بوت أبو فايز";
+
+    // محاولة الإرسال المباشر عبر تليجرام
+    try {
+      if (isAudio) {
+        await bot.sendAudio(chatId, downloadUrl, { caption: captionText });
+      } else {
+        await bot.sendVideo(chatId, downloadUrl, { caption: captionText });
       }
-    });
+    } catch (directErr) {
+      // سحب الملف كـ Stream إذا تطلب السيرفر وسيط
+      const streamRes = await axios({
+        url: downloadUrl,
+        method: 'GET',
+        responseType: 'stream',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      const fileOpts = {
+        filename: isAudio ? `audio_${Date.now()}.mp3` : `video_${Date.now()}.mp4`,
+        contentType: isAudio ? 'audio/mpeg' : 'video/mp4'
+      };
+
+      if (isAudio) {
+        await bot.sendAudio(chatId, streamRes.data, { caption: captionText }, fileOpts);
+      } else {
+        await bot.sendVideo(chatId, streamRes.data, { caption: captionText }, fileOpts);
+      }
+    }
+
+    bot.deleteMessage(chatId, msgId).catch(() => {});
 
   } catch (error) {
-    let errorMsg = error.response?.data?.message || error.message || "حدث خطأ غير معروف";
-    bot.editMessageText(`❌ فشل استخراج الرابط:\n${errorMsg}`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
+    let errorMsg = error.response?.data?.message || error.message || "حدث خطأ أثناء المعالجة";
+    bot.editMessageText(`❌ فشل التحميل:\n${errorMsg}`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
   }
 }
 

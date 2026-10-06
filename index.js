@@ -11,13 +11,6 @@ const adminId = process.env.ADMIN_ID;
 const bot = new TelegramBot(token, { polling: true });
 github.initGithub(bot);
 
-// تسجيل الأوامر بالقائمة الجانبية (Menu) تبع تليجرام
-bot.setMyCommands([
-  { command: 'start', description: 'بدء المحادثة' },
-  { command: 'github', description: 'إدارة جيت هوب' },
-  { command: 'download', description: 'تحميل وسائط' }
-]).catch(() => {});
-
 bot.on("polling_error", (err) => {
   if (err.message && err.message.includes("409 Conflict")) return;
   console.log("Polling Error:", err.message);
@@ -36,24 +29,28 @@ app.listen(port, () => {
   }, 10 * 60 * 1000);
 });
 
-// بدء المحادثة (رسالة ترحيب نظيفة بدون أزرار)
+// إجبار تيليجرام على تحديث القائمة بمجرد بدء المحادثة
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   if (adminId && chatId.toString() !== adminId) return bot.sendMessage(chatId, "🔒 مقفل.");
   
-  await bot.sendMessage(chatId, "أهلاً يا أبو فايز 👋\n\nاضغط على زر القائمة (Menu) اللي تحت على اليسار لتختار شو بدك تعمل.", {
-    reply_markup: { remove_keyboard: true } // تنظيف الشاشة من أي كيبورد قديم
+  await bot.setMyCommands([
+    { command: 'start', description: 'بدء المحادثة' },
+    { command: 'github', description: 'إدارة جيت هوب' },
+    { command: 'download', description: 'تحميل وسائط' }
+  ]).catch(() => {});
+
+  await bot.sendMessage(chatId, "أهلاً يا أبو فايز 👋\n\nتم تحديث القائمة! اضغط على زر (Menu) أو إشارة ( / ) تحت على اليسار لتشوف الأوامر.", {
+    reply_markup: { remove_keyboard: true }
   });
 });
 
-// أمر جيت هوب
 bot.onText(/\/github/, async (msg) => {
   const chatId = msg.chat.id;
   if (adminId && chatId.toString() !== adminId) return;
   await github.resetState(chatId);
 });
 
-// أمر التحميل
 bot.onText(/\/download/, async (msg) => {
   const chatId = msg.chat.id;
   if (adminId && chatId.toString() !== adminId) return;
@@ -70,10 +67,8 @@ bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   if (adminId && chatId.toString() !== adminId) return;
   
-  // تجاهل الأوامر لتجنب التكرار
   if (msg.text && msg.text.startsWith("/")) return; 
 
-  // فحص روابط الوسائط
   if (msg.text && /^https?:\/\//i.test(msg.text.trim()) && !msg.reply_to_message) {
     return downloader.handleMediaLink(bot, msg);
   }

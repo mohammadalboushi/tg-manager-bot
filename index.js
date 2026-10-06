@@ -29,18 +29,12 @@ app.listen(port, () => {
   }, 10 * 60 * 1000);
 });
 
-// إجبار تيليجرام على تحديث القائمة بمجرد بدء المحادثة
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   if (adminId && chatId.toString() !== adminId) return bot.sendMessage(chatId, "🔒 مقفل.");
   
-  await bot.setMyCommands([
-    { command: 'start', description: 'بدء المحادثة' },
-    { command: 'github', description: 'إدارة جيت هوب' },
-    { command: 'download', description: 'تحميل وسائط' }
-  ]).catch(() => {});
-
-  await bot.sendMessage(chatId, "أهلاً يا أبو فايز 👋\n\nتم تحديث القائمة! اضغط على زر (Menu) أو إشارة ( / ) تحت على اليسار لتشوف الأوامر.", {
+  // رسالة ترحيب مع تنظيف الشاشة من أي كيبوردات سابقة
+  await bot.sendMessage(chatId, "أهلاً يا أبو فايز 👋\n\nالقائمة جاهزة، اضغط على زر (Menu) بالأسفل لتختار الأمر.", {
     reply_markup: { remove_keyboard: true }
   });
 });
@@ -67,9 +61,10 @@ bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   if (adminId && chatId.toString() !== adminId) return;
   
-  if (msg.text && msg.text.startsWith("/")) return; 
+  const text = msg.text ? msg.text.trim() : "";
+  if (text.startsWith("/")) return; 
 
-  if (msg.text && /^https?:\/\//i.test(msg.text.trim()) && !msg.reply_to_message) {
+  if (text && /^https?:\/\//i.test(text) && !msg.reply_to_message) {
     return downloader.handleMediaLink(bot, msg);
   }
   

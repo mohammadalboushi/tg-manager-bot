@@ -11,10 +11,11 @@ const adminId = process.env.ADMIN_ID;
 const bot = new TelegramBot(token, { polling: true });
 github.initGithub(bot);
 
-// تسجيل الأمرين بقائمة تليجرام الرسمية المنبثقة
+// تسجيل الأوامر بالقائمة الجانبية (Menu) تبع تليجرام
 bot.setMyCommands([
-  { command: 'github', description: '📁 إدارة جيت هوب' },
-  { command: 'download', description: '📥 تحميل وسائط' }
+  { command: 'start', description: 'بدء المحادثة' },
+  { command: 'github', description: 'إدارة جيت هوب' },
+  { command: 'download', description: 'تحميل وسائط' }
 ]).catch(() => {});
 
 bot.on("polling_error", (err) => {
@@ -35,38 +36,24 @@ app.listen(port, () => {
   }, 10 * 60 * 1000);
 });
 
-// بدء المحادثة وإلغاء الكيبورد السفلي القديم
+// بدء المحادثة (رسالة ترحيب نظيفة بدون أزرار)
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   if (adminId && chatId.toString() !== adminId) return bot.sendMessage(chatId, "🔒 مقفل.");
   
-  // تنظيف الكيبورد السفلي
-  await bot.sendMessage(chatId, "أهلاً يا أبو فايز 👋", {
-    reply_markup: { remove_keyboard: true }
-  });
-
-  // أزرار شفافة بقلب الرسالة
-  await bot.sendMessage(chatId, "👇 **شو حابب تعمل؟**", {
-    parse_mode: "Markdown",
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "📁 إدارة جيت هوب", callback_data: "open_github" },
-          { text: "📥 تحميل وسائط", callback_data: "open_download" }
-        ]
-      ]
-    }
+  await bot.sendMessage(chatId, "أهلاً يا أبو فايز 👋\n\nاضغط على زر القائمة (Menu) اللي تحت على اليسار لتختار شو بدك تعمل.", {
+    reply_markup: { remove_keyboard: true } // تنظيف الشاشة من أي كيبورد قديم
   });
 });
 
-// أمر جيت هوب من القائمة
+// أمر جيت هوب
 bot.onText(/\/github/, async (msg) => {
   const chatId = msg.chat.id;
   if (adminId && chatId.toString() !== adminId) return;
   await github.resetState(chatId);
 });
 
-// أمر التحميل من القائمة
+// أمر التحميل
 bot.onText(/\/download/, async (msg) => {
   const chatId = msg.chat.id;
   if (adminId && chatId.toString() !== adminId) return;
@@ -75,15 +62,6 @@ bot.onText(/\/download/, async (msg) => {
 
 bot.on('callback_query', async (query) => {
   bot.answerCallbackQuery(query.id).catch(() => {});
-  const chatId = query.message.chat.id;
-
-  if (query.data === "open_github") {
-    return github.resetState(chatId);
-  }
-  if (query.data === "open_download") {
-    return bot.sendMessage(chatId, "👇 ابعت رابط الفيديو أو الريلز (فيسبوك، إنستا، تيك توك):");
-  }
-
   if (query.data.startsWith("dl_")) return downloader.handleCallback(bot, query);
   return github.handleCallback(query);
 });
@@ -91,7 +69,9 @@ bot.on('callback_query', async (query) => {
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   if (adminId && chatId.toString() !== adminId) return;
-  if (msg.text && (msg.text.startsWith("/start") || msg.text.startsWith("/github") || msg.text.startsWith("/download"))) return;
+  
+  // تجاهل الأوامر لتجنب التكرار
+  if (msg.text && msg.text.startsWith("/")) return; 
 
   // فحص روابط الوسائط
   if (msg.text && /^https?:\/\//i.test(msg.text.trim()) && !msg.reply_to_message) {

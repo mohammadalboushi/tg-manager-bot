@@ -12,7 +12,7 @@ async function handleMediaLink(bot, msg) {
     [{ text: "🎵 صوت (MP3)", callback_data: `dl_audio` }]
   ];
 
-  bot.sendMessage(chatId, `📌 **استلمت الرابط:**\nشو حابب تنزل يا أبو فايز؟`, {
+  bot.sendMessage(chatId, `📌 **استلمت الرابط:**\nشو حابب تجهز يا أبو فايز؟`, {
     parse_mode: "Markdown",
     reply_markup: { inline_keyboard: keyboard }
   });
@@ -29,10 +29,9 @@ async function handleCallback(bot, query) {
   }
 
   const isAudio = data === "dl_audio";
-  bot.editMessageText(`⏳ جاري سحب الرابط الصافي من RapidAPI...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
+  bot.editMessageText(`⏳ جاري استخراج رابط التحميل الصافي...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
 
   try {
-    // 1. جلب رابط التحميل من الـ API
     const options = {
       method: 'POST',
       url: 'https://social-download-all-in-one.p.rapidapi.com/v1/social/autolink',
@@ -60,33 +59,24 @@ async function handleCallback(bot, query) {
       downloadUrl = resData.url;
     }
 
-    if (!downloadUrl) throw new Error("تعذر سحب الرابط الصافي من السيرفر.");
+    if (!downloadUrl) throw new Error("تعذر سحب الرابط من السيرفر.");
 
-    bot.editMessageText(`📥 جاري تحميل الملف وإرساله لتليجرام... (قد يستغرق قليلاً حسب الحجم)`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
+    const titleText = resData.title ? `📌 **العنوان:** ${resData.title}\n\n` : '';
 
-    // 2. تحميل الملف كـ Stream لتخطي حظر تليجرام
-    const mediaStream = await axios({
-      url: downloadUrl,
-      method: 'GET',
-      responseType: 'stream'
+    await bot.editMessageText(`${titleText}✅ **تم تجهيز الرابط بنجاح!**\n👇 اضغط على الزر ليبدأ التحميل فوراً بجهازك:`, {
+      chat_id: chatId,
+      message_id: msgId,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: isAudio ? "🎵 اضغط لتحميل الصوت (MP3)" : "🎥 اضغط لتحميل الفيديو (MP4)", url: downloadUrl }]
+        ]
+      }
     });
 
-    const fileOptions = {
-      filename: isAudio ? `audio_${Date.now()}.mp3` : `video_${Date.now()}.mp4`,
-      contentType: isAudio ? 'audio/mpeg' : 'video/mp4'
-    };
-
-    // 3. الإرسال المباشر للملف
-    if (isAudio) {
-      await bot.sendAudio(chatId, mediaStream.data, { caption: "🎵 تم التحميل بواسطة بوت أبو فايز" }, fileOptions);
-    } else {
-      await bot.sendVideo(chatId, mediaStream.data, { caption: "🎥 تم التحميل بواسطة بوت أبو فايز" }, fileOptions);
-    }
-    
-    bot.deleteMessage(chatId, msgId).catch(() => {});
   } catch (error) {
     let errorMsg = error.response?.data?.message || error.message || "حدث خطأ غير معروف";
-    bot.editMessageText(`❌ فشل التحميل:\n${errorMsg}`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
+    bot.editMessageText(`❌ فشل استخراج الرابط:\n${errorMsg}`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
   }
 }
 

@@ -29,7 +29,7 @@ async function handleCallback(bot, query) {
   }
 
   const isAudio = data === "dl_audio";
-  bot.editMessageText(`⏳ جاري جلب الفيديو من السيرفر...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
+  bot.editMessageText(isAudio ? `⏳ جاري استخراج الصوت وتجهيزه بصيغة MP3...` : `⏳ جاري جلب الفيديو من السيرفر...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
 
   try {
     const options = {
@@ -49,7 +49,7 @@ async function handleCallback(bot, query) {
 
     if (resData && resData.medias && Array.isArray(resData.medias)) {
       if (isAudio) {
-        const audio = resData.medias.find(m => m.type === 'audio' || m.extension === 'mp3');
+        const audio = resData.medias.find(m => m.type === 'audio' || m.extension === 'mp3' || m.quality === 'audio');
         downloadUrl = audio ? audio.url : resData.medias[0].url;
       } else {
         const video = resData.medias.find(m => (m.type === 'video' || m.extension === 'mp4') && m.quality !== 'audio');
@@ -65,15 +65,8 @@ async function handleCallback(bot, query) {
 
     const captionText = isAudio ? "🎵 تم التحميل بواسطة بوت أبو فايز" : "🎥 تم التحميل بواسطة بوت أبو فايز";
 
-    // محاولة الإرسال المباشر عبر تليجرام
-    try {
-      if (isAudio) {
-        await bot.sendAudio(chatId, downloadUrl, { caption: captionText });
-      } else {
-        await bot.sendVideo(chatId, downloadUrl, { caption: captionText });
-      }
-    } catch (directErr) {
-      // سحب الملف كـ Stream إذا تطلب السيرفر وسيط
+    if (isAudio) {
+      // سحب الصوت وتمريره كـ MP3 خالص لتشغيله بمشغل الأغاني
       const streamRes = await axios({
         url: downloadUrl,
         method: 'GET',
@@ -83,15 +76,32 @@ async function handleCallback(bot, query) {
         }
       });
 
-      const fileOpts = {
-        filename: isAudio ? `audio_${Date.now()}.mp3` : `video_${Date.now()}.mp4`,
-        contentType: isAudio ? 'audio/mpeg' : 'video/mp4'
-      };
+      await bot.sendAudio(chatId, streamRes.data, {
+        caption: captionText,
+        title: resData.title ? resData.title.slice(0, 60) : "صوتيات أبو فايز",
+        performer: "بوت أبو فايز"
+      }, {
+        filename: `audio_${Date.now()}.mp3`,
+        contentType: 'audio/mpeg'
+      });
+    } else {
+      // إرسال الفيديو كملف مرئي
+      try {
+        await bot.sendVideo(chatId, downloadUrl, { caption: captionText });
+      } catch (directErr) {
+        const streamRes = await axios({
+          url: downloadUrl,
+          method: 'GET',
+          responseType: 'stream',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        });
 
-      if (isAudio) {
-        await bot.sendAudio(chatId, streamRes.data, { caption: captionText }, fileOpts);
-      } else {
-        await bot.sendVideo(chatId, streamRes.data, { caption: captionText }, fileOpts);
+        await bot.sendVideo(chatId, streamRes.data, { caption: captionText }, {
+          filename: `video_${Date.now()}.mp4`,
+          contentType: 'video/mp4'
+        });
       }
     }
 

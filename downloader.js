@@ -2,13 +2,9 @@ const axios = require('axios');
 
 const userLinks = new Map();
 
-const RAPID_API_KEY = "1aec64407fmsha5c87fdf0cdb4fdp1815a8jsn26a2b2e13f13";
-const RAPID_API_HOST = "zm-api.p.rapidapi.com";
-
 async function handleMediaLink(bot, msg) {
   const chatId = msg.chat.id;
   const url = msg.text.trim();
-
   userLinks.set(chatId, url);
 
   const keyboard = [
@@ -16,7 +12,7 @@ async function handleMediaLink(bot, msg) {
     [{ text: "🎵 صوت (MP3)", callback_data: `dl_audio` }]
   ];
 
-  bot.sendMessage(chatId, `📌 **استلمت الرابط:**\nشو الصيغة اللي حابب تنزلها يا أبو فايز؟`, {
+  bot.sendMessage(chatId, `📌 **استلمت الرابط:**\nشو حابب تنزل يا أبو فايز؟`, {
     parse_mode: "Markdown",
     reply_markup: { inline_keyboard: keyboard }
   });
@@ -32,17 +28,20 @@ async function handleCallback(bot, query) {
     return bot.editMessageText(`❌ الرابط مفقود، ارجع ابعته مرة تانية.`, { chat_id: chatId, message_id: msgId });
   }
 
-  bot.editMessageText(`⏳ جاري المعالجة عبر سيرفر ZM الآمن...`, { chat_id: chatId, message_id: msgId });
+  const isAudio = data === "dl_audio";
+  bot.editMessageText(`⏳ جاري المعالجة وسحب الملف عبر سيرفر RapidAPI...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
 
   try {
-    // التوجيه للـ Endpoint الصحيح الخاص بالتحميل في ZM API
     const options = {
-      method: 'GET',
-      url: `https://${RAPID_API_HOST}/media/social/download`,
-      params: { url: url },
+      method: 'POST',
+      url: 'https://social-download-all-in-one.p.rapidapi.com/v1/social/autolink',
       headers: {
-        'x-rapidapi-key': RAPID_API_KEY,
-        'x-rapidapi-host': RAPID_API_HOST
+        'content-type': 'application/json',
+        'X-RapidAPI-Host': 'social-download-all-in-one.p.rapidapi.com',
+        'X-RapidAPI-Key': '1aec64407fmsha5c87fdf0cdb4fdp1815a8jsn26a2b2e13f13'
+      },
+      data: {
+        url: url
       }
     };
 
@@ -50,43 +49,35 @@ async function handleCallback(bot, query) {
     const resData = response.data;
 
     let downloadUrl = null;
-    const isAudio = data === "dl_audio";
 
-    // استخراج الروابط من الاستجابة حسب هيكلة ZM API
-    if (resData.medias && Array.isArray(resData.medias)) {
+    // استخراج رابط التحميل بناءً على استجابة الـ API
+    if (resData && resData.medias && Array.isArray(resData.medias)) {
       if (isAudio) {
-        const audioItem = resData.medias.find(m => m.type === "audio") || resData.medias.find(m => m.extension === "mp3");
-        if (audioItem) downloadUrl = audioItem.url;
+        const audio = resData.medias.find(m => m.type === 'audio' || m.extension === 'mp3');
+        downloadUrl = audio ? audio.url : resData.medias[0].url;
       } else {
-        const videoItem = resData.medias.find(m => m.type === "video") || resData.medias[0];
-        if (videoItem) downloadUrl = videoItem.url;
+        const video = resData.medias.find(m => (m.type === 'video' || m.extension === 'mp4') && m.quality !== 'audio');
+        downloadUrl = video ? video.url : resData.medias[0].url;
       }
+    } else if (resData && resData.url) {
+      downloadUrl = resData.url;
     }
 
-    if (!downloadUrl) {
-      downloadUrl = resData.url || resData.download_url || (resData.data && resData.data.url);
-    }
+    if (!downloadUrl) throw new Error("تعذر سحب الرابط الصافي من السيرفر.");
 
-    if (!downloadUrl) throw new Error("تعذر استخراج رابط التحميل من الاستجابة.");
-
-    bot.editMessageText(`🚀 جاري الإرسال لتليجرام...`, { chat_id: chatId, message_id: msgId });
+    bot.editMessageText(`🚀 جاري الإرسال لتليجرام...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
 
     if (isAudio) {
       await bot.sendAudio(chatId, downloadUrl, { caption: "🎵 تم التحميل بواسطة بوت أبو فايز" });
     } else {
       await bot.sendVideo(chatId, downloadUrl, { caption: "🎥 تم التحميل بواسطة بوت أبو فايز" });
     }
-
+    
     bot.deleteMessage(chatId, msgId).catch(() => {});
-
-  }чает (error) {
-    let errorMsg = "عذراً، فشل التحميل.";
-    if (error.response && error.response.data && error.response.data.message) {
-      errorMsg = error.response.data.message;
-    } else if (error.message) {
-      errorMsg = error.message;
-    }
-    bot.editMessageText(`❌ ${errorMsg}`, { chat_id: chatId, message_id: msgId });
+  } catch (error) {
+    let errorMsg = error.response?.data?.message || error.message || "حدث خطأ غير معروف";
+    console.error("RapidAPI Error:", errorMsg);
+    bot.editMessageText(`❌ فشل التحميل:\n${errorMsg}`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
   }
 }
 

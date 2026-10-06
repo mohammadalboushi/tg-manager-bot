@@ -413,24 +413,25 @@ async function handleMessage(msg) {
 // دالة مراقبة حالة النقطة البرتقالية على غيتهوب
 async function trackCommitStatus(chatId, repo, sha, actionName) {
   const startTime = Date.now();
-  const maxWait = 5 * 60 * 1000; // أقصى حد للمراقبة 5 دقايق
-  const interval = 30 * 1000; // بيفحص كل 30 ثانية (آمن جداً)
+  const maxWait = 6 * 60 * 1000; // أقصى حد للمراقبة 6 دقايق
+  const interval = 15 * 1000; // بيفحص كل 15 ثانية حسب طلبك
 
   const timer = setInterval(async () => {
     try {
       if (Date.now() - startTime > maxWait) {
         clearInterval(timer);
+        bot.sendMessage(chatId, `⚠️ **تنبيه:** التعديل (${actionName}) انحفظ بغيتهوب 100%، بس الإشارة الخضراء أخدت وقت طويل لتبين. فيك تشيك عالموقع هلق.`, { parse_mode: "Markdown" });
         return;
       }
       
       const res = await axios.get(`https://api.github.com/repos/${ghUser}/${repo}/commits/${sha}/check-runs`, { headers: ghHeaders });
       const runs = res.data.check_runs;
       
-      // إذا مر 30 ثانية وما في بناء (المستودع ما فيه Pages أصلاً) ننهي العملية بإشعار نجاح
+      // إذا مر 45 ثانية وما في بناء (المستودع ما فيه Pages أصلاً) ننهي العملية بإشعار نجاح
       if (!runs || runs.length === 0) {
-        if (Date.now() - startTime >= interval) {
+        if (Date.now() - startTime >= 45000) {
           clearInterval(timer);
-          bot.sendMessage(chatId, `🟢 **تم تثبيت التعديل بنجاح!**\nاكتمل (${actionName}) وثبت على غيتهوب.`, { parse_mode: "Markdown" });
+          bot.sendMessage(chatId, `🟢 **تم الحفظ بنجاح!**\nاكتمل (${actionName}) وثبت على غيتهوب.`, { parse_mode: "Markdown" });
         }
         return;
       }
@@ -443,7 +444,7 @@ async function trackCommitStatus(chatId, repo, sha, actionName) {
         const allSuccess = runs.every(run => run.conclusion === 'success' || run.conclusion === 'neutral' || run.conclusion === 'skipped');
         
         if (allSuccess) {
-          bot.sendMessage(chatId, `🟢 **تحديث موقعك جاهز!**\nاكتمل (${actionName}) وصارت الإشارة خضراء. فيك تفوت ع الموقع هلأ.`, {parse_mode: "Markdown"});
+          bot.sendMessage(chatId, `🟢 **تحديث موقعك جاهز!**\nاكتمل (${actionName}) وصارت الإشارة خضراء 🚀.`, {parse_mode: "Markdown"});
         } else {
           bot.sendMessage(chatId, `🔴 **فشل في النشر!**\nعملية (${actionName}) عطت إشارة حمراء على غيتهوب.`, {parse_mode: "Markdown"});
         }

@@ -35,13 +35,17 @@ async function handleCallback(bot, query) {
     let downloadUrl = null;
     let mediaTitle = "صوتيات أبو فايز";
 
-    // معالجة خاصة لروابط سمول (Smule) عبر بروكسي لتخطي حظر 403
+    // معالجة خاصة لروابط سمول (Smule) عبر بروكسي CorsProxy المفتوح المصدر لتخطي الحظر
     if (url.includes('smule.com')) {
-      const proxyUrl = `https://api.allorigins.win/get?disableCache=true&url=${encodeURIComponent(url)}`;
-      const htmlRes = await axios.get(proxyUrl, { timeout: 15000 });
+      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+      const htmlRes = await axios.get(proxyUrl, {
+        headers: { 
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        timeout: 15000
+      });
       
-      // البروكسي يعيد كود الـ HTML داخل متغير contents
-      const html = htmlRes.data.contents; 
+      const html = htmlRes.data;
 
       if (!html) throw new Error("تعذر جلب محتوى الصفحة من البروكسي.");
 

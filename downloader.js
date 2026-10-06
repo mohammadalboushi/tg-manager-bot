@@ -38,7 +38,11 @@ async function handleCallback(bot, query) {
     // معالجة خاصة لروابط سمول (Smule) بدون الحاجة لـ RapidAPI
     if (url.includes('smule.com')) {
       const htmlRes = await axios.get(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        headers: { 
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Referer': 'https://www.smule.com/',
+          'Origin': 'https://www.smule.com'
+        },
         timeout: 15000
       });
       const html = htmlRes.data;
@@ -108,7 +112,9 @@ async function handleCallback(bot, query) {
         method: 'GET',
         responseType: 'stream',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Referer': 'https://www.smule.com/',
+          'Range': 'bytes=0-'
         }
       });
 

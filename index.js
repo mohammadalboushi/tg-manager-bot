@@ -29,10 +29,20 @@ app.listen(port, () => {
   }, 10 * 60 * 1000);
 });
 
+// الأزرار الثابتة بأسفل الشاشة
+const mainKeyboard = {
+  reply_markup: {
+    keyboard: [
+      [{ text: "📁 إدارة جيت هوب" }, { text: "📥 تحميل وسائط" }]
+    ],
+    resize_keyboard: true
+  }
+};
+
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   if (adminId && chatId.toString() !== adminId) return bot.sendMessage(chatId, "🔒 مقفل.");
-  await github.resetState(chatId);
+  await bot.sendMessage(chatId, "أهلاً يا أبو فايز، اختار شو بدك تعمل من الأزرار تحت 👇", mainKeyboard);
 });
 
 bot.on('callback_query', async (query) => {
@@ -46,9 +56,21 @@ bot.on('message', async (msg) => {
   if (adminId && chatId.toString() !== adminId) return;
   if (msg.text === "/start") return;
 
+  // الضغط على زر جيت هوب
+  if (msg.text === "📁 إدارة جيت هوب") {
+    return github.resetState(chatId);
+  }
+
+  // الضغط على زر تحميل وسائط
+  if (msg.text === "📥 تحميل وسائط") {
+    return bot.sendMessage(chatId, "👇 ابعت رابط الفيديو أو الريلز (فيسبوك، إنستا، تيك توك) لنجهزه فوراً:");
+  }
+
+  // فحص روابط الوسائط
   if (msg.text && /^https?:\/\//i.test(msg.text.trim()) && !msg.reply_to_message) {
     return downloader.handleMediaLink(bot, msg);
   }
+  
   return github.handleMessage(msg);
 });
 

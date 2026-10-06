@@ -39,9 +39,9 @@ async function handleCallback(bot, query) {
     if (url.includes('smule.com')) {
       const htmlRes = await axios.get(url, {
         headers: { 
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'User-Agent': 'Smule/10.1.3 (iPhone; iOS 16.5; Scale/3.00)',
           'Referer': 'https://www.smule.com/',
-          'Origin': 'https://www.smule.com'
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
         },
         timeout: 15000
       });

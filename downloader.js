@@ -40,7 +40,8 @@ async function handleCallback(bot, query) {
         'X-RapidAPI-Host': 'social-download-all-in-one.p.rapidapi.com',
         'X-RapidAPI-Key': '1aec64407fmsha5c87fdf0cdb4fdp1815a8jsn26a2b2e13f13'
       },
-      data: { url: url }
+      data: { url: url },
+      timeout: 19000
     };
 
     const response = await axios.request(options);

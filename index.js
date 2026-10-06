@@ -32,23 +32,7 @@ app.listen(port, () => {
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   if (adminId && chatId.toString() !== adminId) return bot.sendMessage(chatId, "🔒 مقفل.");
-  
-  // رسالة ترحيب مع تنظيف الشاشة من أي كيبوردات سابقة
-  await bot.sendMessage(chatId, "أهلاً يا أبو فايز 👋\n\nالقائمة جاهزة، اضغط على زر (Menu) بالأسفل لتختار الأمر.", {
-    reply_markup: { remove_keyboard: true }
-  });
-});
-
-bot.onText(/\/github/, async (msg) => {
-  const chatId = msg.chat.id;
-  if (adminId && chatId.toString() !== adminId) return;
   await github.resetState(chatId);
-});
-
-bot.onText(/\/download/, async (msg) => {
-  const chatId = msg.chat.id;
-  if (adminId && chatId.toString() !== adminId) return;
-  await bot.sendMessage(chatId, "👇 ابعت رابط الفيديو أو الريلز (فيسبوك، إنستا، تيك توك):");
 });
 
 bot.on('callback_query', async (query) => {
@@ -60,14 +44,11 @@ bot.on('callback_query', async (query) => {
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   if (adminId && chatId.toString() !== adminId) return;
-  
-  const text = msg.text ? msg.text.trim() : "";
-  if (text.startsWith("/")) return; 
+  if (msg.text === "/start") return;
 
-  if (text && /^https?:\/\//i.test(text) && !msg.reply_to_message) {
+  if (msg.text && /^https?:\/\//i.test(msg.text.trim()) && !msg.reply_to_message) {
     return downloader.handleMediaLink(bot, msg);
   }
-  
   return github.handleMessage(msg);
 });
 

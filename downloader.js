@@ -32,74 +32,31 @@ async function handleCallback(bot, query) {
   bot.editMessageText(isAudio ? `⏳ جاري استخراج الصوت وتجهيزه بصيغة MP3...` : `⏳ جاري جلب الفيديو من السيرفر...`, { chat_id: chatId, message_id: msgId }).catch(()=>{});
 
   try {
+    const options = {
+      method: 'POST',
+      url: 'https://social-download-all-in-one.p.rapidapi.com/v1/social/autolink',
+      headers: {
+        'content-type': 'application/json',
+        'X-RapidAPI-Host': 'social-download-all-in-one.p.rapidapi.com',
+        'X-RapidAPI-Key': '1aec64407fmsha5c87fdf0cdb4fdp1815a8jsn26a2b2e13f13'
+      },
+      data: { url: url }
+    };
+
+    const response = await axios.request(options);
+    const resData = response.data;
     let downloadUrl = null;
-    let mediaTitle = "صوتيات أبو فايز";
 
-    // معالجة خاصة لروابط سمول (Smule) عبر بروكسي CorsProxy المفتوح المصدر لتخطي الحظر
-    if (url.includes('smule.com')) {
-      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-      const htmlRes = await axios.get(proxyUrl, {
-        headers: { 
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        },
-        timeout: 15000
-      });
-      
-      const html = htmlRes.data;
-
-      if (!html) throw new Error("تعذر جلب محتوى الصفحة من البروكسي.");
-
-      const audioMatch = html.match(/<meta\s+property="og:audio"\s+content="([^"]+)"/i) || html.match(/content="([^"]+)"\s+property="og:audio"/i);
-      const videoMatch = html.match(/<meta\s+property="og:video"\s+content="([^"]+)"/i) || html.match(/content="([^"]+)"\s+property="og:video"/i);
-      const titleMatch = html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i) || html.match(/content="([^"]+)"\s+property="og:title"/i);
-
-      if (titleMatch) mediaTitle = titleMatch[1];
-
-      if (isAudio && audioMatch) {
-        downloadUrl = audioMatch[1];
-      } else if (!isAudio && videoMatch) {
-        downloadUrl = videoMatch[1];
+    if (resData && resData.medias && Array.isArray(resData.medias)) {
+      if (isAudio) {
+        const audio = resData.medias.find(m => m.type === 'audio' || m.extension === 'mp3' || m.quality === 'audio');
+        downloadUrl = audio ? audio.url : resData.medias[0].url;
       } else {
-        downloadUrl = (audioMatch ? audioMatch[1] : null) || (videoMatch ? videoMatch[1] : null);
+        const video = resData.medias.find(m => (m.type === 'video' || m.extension === 'mp4') && m.quality !== 'audio');
+        downloadUrl = video ? video.url : resData.medias[0].url;
       }
-
-      if (!downloadUrl) {
-        const perfMatch = html.match(/"secure_url":"([^"]+)"/i);
-        if (perfMatch) downloadUrl = perfMatch[1].replace(/\\u002F/g, '/');
-      }
-
-      if (!downloadUrl) throw new Error("تعذر استخراج ملف الصوت من سمول.");
-
-    } else {
-      // المنصات الأخرى عبر RapidAPI
-      const options = {
-        method: 'POST',
-        url: 'https://social-download-all-in-one.p.rapidapi.com/v1/social/autolink',
-        headers: {
-          'content-type': 'application/json',
-          'X-RapidAPI-Host': 'social-download-all-in-one.p.rapidapi.com',
-          'X-RapidAPI-Key': '1aec64407fmsha5c87fdf0cdb4fdp1815a8jsn26a2b2e13f13'
-        },
-        data: { url: url },
-        timeout: 15000
-      };
-
-      const response = await axios.request(options);
-      const resData = response.data;
-
-      if (resData && resData.medias && Array.isArray(resData.medias)) {
-        if (isAudio) {
-          const audio = resData.medias.find(m => m.type === 'audio' || m.extension === 'mp3' || m.quality === 'audio');
-          downloadUrl = audio ? audio.url : resData.medias[0].url;
-        } else {
-          const video = resData.medias.find(m => (m.type === 'video' || m.extension === 'mp4') && m.quality !== 'audio');
-          downloadUrl = video ? video.url : resData.medias[0].url;
-        }
-      } else if (resData && resData.url) {
-        downloadUrl = resData.url;
-      }
-
-      if (resData && resData.title) mediaTitle = resData.title;
+    } else if (resData && resData.url) {
+      downloadUrl = resData.url;
     }
 
     if (!downloadUrl) throw new Error("تعذر استخراج رابط التحميل.");
@@ -109,26 +66,26 @@ async function handleCallback(bot, query) {
     const captionText = isAudio ? "🎵 تم التحميل بواسطة بوت أبو فايز" : "🎥 تم التحميل بواسطة بوت أبو فايز";
 
     if (isAudio) {
+      // سحب الصوت وتمريره كـ MP3 خالص لتشغيله بمشغل الأغاني
       const streamRes = await axios({
         url: downloadUrl,
         method: 'GET',
         responseType: 'stream',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Referer': 'https://www.smule.com/',
-          'Range': 'bytes=0-'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
       });
 
       await bot.sendAudio(chatId, streamRes.data, {
         caption: captionText,
-        title: mediaTitle.slice(0, 60),
+        title: resData.title ? resData.title.slice(0, 60) : "صوتيات أبو فايز",
         performer: "بوت أبو فايز"
       }, {
         filename: `audio_${Date.now()}.mp3`,
         contentType: 'audio/mpeg'
       });
     } else {
+      // إرسال الفيديو كملف مرئي
       try {
         await bot.sendVideo(chatId, downloadUrl, { caption: captionText });
       } catch (directErr) {

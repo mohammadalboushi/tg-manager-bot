@@ -206,16 +206,10 @@ async function processDelete(chatId, repo, path, msgId) {
         headers: ghHeaders, data: { message: `حذف ${path}`, sha: data.sha }
       });
     }
-    bot.editMessageText(`✅ **تم الحذف بنجاح!** 🗑️\n⏳ عم راقب غيتهوب لتخضرّ الإشارة...`, {
+    bot.editMessageText(`✅ تم الحذف بنجاح! 🗑️`, {
       chat_id: chatId, message_id: msgId, parse_mode: "Markdown",
       reply_markup: { inline_keyboard: [[{ text: "🔙 رجوع للمستودع", callback_data: `repo:${repo}` }]] }
     });
-    
-    // جلب أحدث شعاع (commit) للمستودع لتتبعه بعد الحذف
-    const refRes = await axios.get(`https://api.github.com/repos/${ghUser}/${repo}/git/ref/heads/main`, { headers: ghHeaders }).catch(()=>null);
-    if (refRes && refRes.data) {
-      trackCommitStatus(chatId, repo, refRes.data.object.sha, `حذف ${path}`);
-    }
   } catch (e) {
     bot.editMessageText(`❌ تعذر الحذف.`, { chat_id: chatId, message_id: msgId });
   }
@@ -416,31 +410,32 @@ async function handleMessage(msg) {
   }
 }
 
-// دالة مراقبة حالة النقطة البرتقالية على غيتهوب (كل 20 ثانية)
+// دالة مراقبة حالة النقطة البرتقالية على غيتهوب
 async function trackCommitStatus(chatId, repo, sha, actionName) {
   const startTime = Date.now();
-  const maxWait = 6 * 60 * 1000; // أقصى حد 6 دقائق
-  const interval = 20 * 1000; // الفحص كل 20 ثانية
+  const maxWait = 5 * 60 * 1000; // أقصى حد للمراقبة 5 دقايق
+  const interval = 30 * 1000; // بيفحص كل 30 ثانية (آمن جداً)
 
   const timer = setInterval(async () => {
     try {
       if (Date.now() - startTime > maxWait) {
         clearInterval(timer);
-        bot.sendMessage(chatId, `⚠️ **تنبيه:** العملية (${actionName}) انحفظت بغيتهوب 100%، بس الإشارة الخضراء أخدت وقت طويل لتبين. فيك تشيك عالموقع هلق.`, { parse_mode: "Markdown" });
         return;
       }
       
       const res = await axios.get(`https://api.github.com/repos/${ghUser}/${repo}/commits/${sha}/check-runs`, { headers: ghHeaders });
       const runs = res.data.check_runs;
       
+      // إذا مر 30 ثانية وما في بناء (المستودع ما فيه Pages أصلاً) ننهي العملية بإشعار نجاح
       if (!runs || runs.length === 0) {
-        if (Date.now() - startTime >= 40000) {
+        if (Date.now() - startTime >= interval) {
           clearInterval(timer);
-          bot.sendMessage(chatId, `🟢 **تم الحفظ بنجاح!**\nاكتمل (${actionName}) وثبت على غيتهوب.`, { parse_mode: "Markdown" });
+          bot.sendMessage(chatId, `🟢 **تم تثبيت التعديل بنجاح!**\nاكتمل (${actionName}) وثبت على غيتهوب.`, { parse_mode: "Markdown" });
         }
         return;
       }
 
+      // هل كل العمليات خلصت؟
       const allCompleted = runs.every(run => run.status === 'completed');
       
       if (allCompleted) {
@@ -448,12 +443,14 @@ async function trackCommitStatus(chatId, repo, sha, actionName) {
         const allSuccess = runs.every(run => run.conclusion === 'success' || run.conclusion === 'neutral' || run.conclusion === 'skipped');
         
         if (allSuccess) {
-          bot.sendMessage(chatId, `🟢 **تحديث موقعك جاهز!**\nاكتمل (${actionName}) وصارت الإشارة خضراء 🚀.`, {parse_mode: "Markdown"});
+          bot.sendMessage(chatId, `🟢 **تحديث موقعك جاهز!**\nاكتمل (${actionName}) وصارت الإشارة خضراء. فيك تفوت ع الموقع هلأ.`, {parse_mode: "Markdown"});
         } else {
           bot.sendMessage(chatId, `🔴 **فشل في النشر!**\nعملية (${actionName}) عطت إشارة حمراء على غيتهوب.`, {parse_mode: "Markdown"});
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      // إذا صار خطأ بالاتصال منتجاهله ومنكمل فحص
+    }
   }, interval);
 }
 

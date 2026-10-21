@@ -100,7 +100,7 @@ async function deleteFullRepository(chatId, repoName, msgId) {
 
 async function sendReposMenu(chatId, page, messageId = null) {
   try {
-    const res = await axios.get(`https://api.github.com/user/repos?type=owner&sort=updated&per_page=100`, { headers: ghHeaders });
+    const res = await axios.get(`https://api.github.com/user/repos?visibility=all&affiliation=owner,collaborator&sort=updated&per_page=100`, { headers: ghHeaders });
     const repos = res.data;
     const itemsPerPage = 10;
     const totalPages = Math.ceil(repos.length / itemsPerPage);
